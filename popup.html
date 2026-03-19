@@ -1,0 +1,268 @@
+<!DOCTYPE html>
+<html lang="fr">
+<head>
+<meta charset="UTF-8">
+<style>
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+  body {
+    width: 420px; max-height: 580px; overflow-y: auto;
+    font-family: system-ui, -apple-system, sans-serif;
+    background: #0e0f11; color: #d1d0c7; font-size: 13px;
+  }
+
+  .header {
+    background: linear-gradient(135deg, #0F6E56 0%, #085041 100%);
+    padding: 16px; display: flex; align-items: center; gap: 10px;
+  }
+  .header-icon { width: 32px; height: 32px; border-radius: 8px; background: rgba(255,255,255,0.15); display: flex; align-items: center; justify-content: center; font-size: 16px; color: #e1f5ee; font-weight: 700; }
+  .header h1 { font-size: 15px; font-weight: 600; color: #e1f5ee; }
+  .header p { font-size: 11px; color: #9fe1cb; margin-top: 2px; }
+  .version { font-size: 10px; background: rgba(255,255,255,0.15); padding: 2px 6px; border-radius: 3px; color: #9fe1cb; margin-left: 8px; }
+
+  .stats-grid { display: grid; grid-template-columns: repeat(4, 1fr); gap: 1px; background: #1e1f23; margin: 1px 0; }
+  .stat-card { background: #14151a; padding: 10px; text-align: center; }
+  .stat-value { font-size: 20px; font-weight: 700; font-variant-numeric: tabular-nums; }
+  .stat-label { font-size: 9px; text-transform: uppercase; letter-spacing: 0.5px; color: #888780; margin-top: 3px; }
+  .v-green { color: #5DCAA5; }
+  .v-amber { color: #EF9F27; }
+  .v-red { color: #E24B4A; }
+  .v-teal { color: #5DCAA5; }
+
+  .section { padding: 12px 16px; border-bottom: 1px solid #1e1f23; }
+  .section-title { font-size: 11px; text-transform: uppercase; letter-spacing: 0.8px; color: #888780; margin-bottom: 8px; }
+
+  .mode-toggle { display: flex; background: #1e1f23; border-radius: 6px; overflow: hidden; }
+  .mode-btn { flex: 1; padding: 7px 4px; text-align: center; cursor: pointer; border: none; background: transparent; color: #888780; font-size: 11px; font-weight: 500; transition: all 0.2s; }
+  .mode-btn.active { background: #0F6E56; color: #e1f5ee; }
+  .mode-btn:hover:not(.active) { background: #2a2b30; color: #d1d0c7; }
+
+  .llm-row { display: flex; align-items: center; gap: 10px; padding: 6px 0; }
+  .llm-dot { width: 10px; height: 10px; border-radius: 50%; flex-shrink: 0; }
+  .llm-name { width: 70px; font-size: 12px; font-weight: 500; }
+  .llm-bar-track { flex: 1; height: 6px; background: #1e1f23; border-radius: 3px; overflow: hidden; position: relative; }
+  .llm-bar-fill { height: 100%; border-radius: 3px; transition: width 0.3s; position: absolute; left: 0; top: 0; }
+  .llm-count { width: 30px; text-align: right; font-size: 11px; color: #888780; font-variant-numeric: tabular-nums; }
+
+  .pii-bar { display: flex; align-items: center; gap: 8px; padding: 3px 0; }
+  .pii-bar-label { width: 120px; font-size: 11px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  .pii-bar-track { flex: 1; height: 5px; background: #1e1f23; border-radius: 3px; overflow: hidden; }
+  .pii-bar-fill { height: 100%; border-radius: 3px; background: #EF9F27; transition: width 0.3s; }
+  .pii-bar-count { width: 26px; text-align: right; font-size: 11px; font-variant-numeric: tabular-nums; color: #888780; }
+
+  .log-entry { padding: 7px 0; border-bottom: 1px solid #1a1b1f; display: flex; gap: 8px; align-items: flex-start; }
+  .log-entry:last-child { border-bottom: none; }
+  .log-dot { width: 8px; height: 8px; border-radius: 50%; margin-top: 4px; flex-shrink: 0; }
+  .log-dot.clean { background: #5DCAA5; }
+  .log-dot.warn { background: #EF9F27; }
+  .log-dot.block { background: #E24B4A; }
+  .log-dot.anon { background: #1D9E75; }
+  .log-text { flex: 1; }
+  .log-time { font-size: 10px; color: #5f5e5a; font-variant-numeric: tabular-nums; }
+  .log-prompt { font-size: 12px; color: #b4b2a9; margin-top: 2px; word-break: break-word; }
+  .log-meta { display: flex; gap: 4px; margin-top: 3px; flex-wrap: wrap; }
+  .log-tag { font-size: 10px; padding: 1px 6px; border-radius: 3px; font-weight: 500; }
+  .log-tag.critical { background: #501313; color: #F09595; }
+  .log-tag.high { background: #4A1B0C; color: #F0997B; }
+  .log-tag.medium { background: #412402; color: #FAC775; }
+  .log-tag.low { background: #042C53; color: #85B7EB; }
+  .log-tag.llm { background: #1e1f23; color: #d1d0c7; }
+
+  .empty-state { text-align: center; padding: 20px; color: #5f5e5a; font-size: 12px; }
+
+  .footer { padding: 10px 16px; display: flex; justify-content: space-between; align-items: center; }
+  .btn { background: none; border: 1px solid #2a2b30; color: #888780; padding: 5px 10px; border-radius: 5px; cursor: pointer; font-size: 11px; transition: all 0.2s; }
+  .btn:hover { border-color: #5f5e5a; color: #d1d0c7; }
+  .btn.danger:hover { border-color: #A32D2D; color: #F09595; }
+</style>
+</head>
+<body>
+
+<div class="header">
+  <div class="header-icon">G</div>
+  <div>
+    <h1>LLM Guard <span class="version">v2</span></h1>
+    <p>Multi-LLM — RGPD & AI Act</p>
+  </div>
+</div>
+
+<div class="stats-grid">
+  <div class="stat-card">
+    <div class="stat-value v-green" id="s-total">0</div>
+    <div class="stat-label">Prompts</div>
+  </div>
+  <div class="stat-card">
+    <div class="stat-value v-teal" id="s-anon">0</div>
+    <div class="stat-label">Anonymisés</div>
+  </div>
+  <div class="stat-card">
+    <div class="stat-value v-amber" id="s-flag">0</div>
+    <div class="stat-label">Alertés</div>
+  </div>
+  <div class="stat-card">
+    <div class="stat-value v-red" id="s-block">0</div>
+    <div class="stat-label">Bloqués</div>
+  </div>
+</div>
+
+<div class="section">
+  <div class="section-title">Mode de protection</div>
+  <div class="mode-toggle">
+    <button class="mode-btn" data-mode="anonymize">Anonymiser</button>
+    <button class="mode-btn" data-mode="warn">Avertir</button>
+    <button class="mode-btn" data-mode="block">Bloquer</button>
+  </div>
+</div>
+
+<div class="section" id="llm-section" style="display:none">
+  <div class="section-title">Usage par LLM</div>
+  <div id="llm-bars"></div>
+</div>
+
+<div class="section" id="pii-section" style="display:none">
+  <div class="section-title">Détections par type</div>
+  <div id="pii-bars"></div>
+</div>
+
+<div class="section">
+  <div class="section-title">Journal récent</div>
+  <div id="log-list">
+    <div class="empty-state">Aucune activité enregistrée.</div>
+  </div>
+</div>
+
+<div class="footer">
+  <button class="btn danger" id="btn-clear">Effacer</button>
+  <button class="btn" id="btn-export">Exporter JSON</button>
+</div>
+
+<script>
+  const LLM_COLORS = { ChatGPT: "#10A37F", Claude: "#D97706", Gemini: "#4285F4", Copilot: "#0078D4" };
+
+  document.addEventListener("DOMContentLoaded", () => {
+    loadStats(); loadLogs(); loadMode();
+    document.getElementById("btn-clear").addEventListener("click", clearLogs);
+    document.getElementById("btn-export").addEventListener("click", exportLogs);
+    document.querySelectorAll(".mode-btn").forEach(b =>
+      b.addEventListener("click", () => setMode(b.dataset.mode))
+    );
+  });
+
+  function loadStats() {
+    chrome.runtime.sendMessage({ source: "llm-guard", type: "getStats" }, (r) => {
+      if (!r?.stats) return;
+      const s = r.stats;
+      document.getElementById("s-total").textContent = s.totalPrompts;
+      document.getElementById("s-anon").textContent = s.anonymizedPrompts;
+      document.getElementById("s-flag").textContent = s.flaggedPrompts;
+      document.getElementById("s-block").textContent = s.blockedPrompts;
+
+      // LLM bars
+      const llmSection = document.getElementById("llm-section");
+      const llmContainer = document.getElementById("llm-bars");
+      const llmEntries = Object.entries(s.byLLM || {}).sort((a,b) => b[1].total - a[1].total);
+      if (llmEntries.length > 0) {
+        llmSection.style.display = "block";
+        const maxLLM = llmEntries[0][1].total;
+        llmContainer.innerHTML = llmEntries.map(([name, d]) => `
+          <div class="llm-row">
+            <div class="llm-dot" style="background:${LLM_COLORS[name] || '#888'}"></div>
+            <span class="llm-name">${name}</span>
+            <div class="llm-bar-track">
+              <div class="llm-bar-fill" style="width:${(d.clean/maxLLM)*100}%;background:#5DCAA5;opacity:0.6"></div>
+              <div class="llm-bar-fill" style="width:${(d.total/maxLLM)*100}%;background:${LLM_COLORS[name]||'#888'};opacity:0.3"></div>
+            </div>
+            <span class="llm-count">${d.total}</span>
+          </div>
+        `).join("");
+      }
+
+      // PII bars
+      const piiSection = document.getElementById("pii-section");
+      const piiContainer = document.getElementById("pii-bars");
+      const piiEntries = Object.entries(s.piiByType || {}).sort((a,b) => b[1] - a[1]);
+      if (piiEntries.length > 0) {
+        piiSection.style.display = "block";
+        const maxPII = piiEntries[0][1];
+        piiContainer.innerHTML = piiEntries.map(([type, count]) => `
+          <div class="pii-bar">
+            <span class="pii-bar-label">${type}</span>
+            <div class="pii-bar-track"><div class="pii-bar-fill" style="width:${(count/maxPII)*100}%"></div></div>
+            <span class="pii-bar-count">${count}</span>
+          </div>
+        `).join("");
+      }
+    });
+  }
+
+  function loadLogs() {
+    chrome.runtime.sendMessage({ source: "llm-guard", type: "getLogs" }, (r) => {
+      const container = document.getElementById("log-list");
+      const logs = r?.logs || [];
+      if (logs.length === 0) {
+        container.innerHTML = '<div class="empty-state">Aucune activité enregistrée.</div>';
+        return;
+      }
+      container.innerHTML = logs.slice(0, 25).map(log => {
+        const dotClass = log.action === "BLOCKED" ? "block" : log.action === "ANONYMIZED" ? "anon" : log.action === "PII_DETECTED" ? "warn" : "clean";
+        const time = new Date(log.timestamp).toLocaleTimeString("fr-FR", { hour: "2-digit", minute: "2-digit", second: "2-digit" });
+        const tags = (log.findings || []).map(f => `<span class="log-tag ${f.severity}">${f.type} (${f.count})</span>`).join("");
+        const preview = log.anonymizedPreview || log.promptPreview || "";
+        const llmTag = log.llm ? `<span class="log-tag llm">${log.llm}</span>` : "";
+        return `
+          <div class="log-entry">
+            <div class="log-dot ${dotClass}"></div>
+            <div class="log-text">
+              <div class="log-time">${time} — ${log.action}</div>
+              <div class="log-prompt">${escapeHtml(preview)}</div>
+              <div class="log-meta">${llmTag}${tags}</div>
+            </div>
+          </div>`;
+      }).join("");
+    });
+  }
+
+  function loadMode() {
+    chrome.storage.local.get(["guard_mode"], (r) => {
+      const mode = r.guard_mode || "anonymize";
+      document.querySelectorAll(".mode-btn").forEach(b =>
+        b.classList.toggle("active", b.dataset.mode === mode)
+      );
+    });
+  }
+
+  function setMode(mode) {
+    chrome.storage.local.set({ guard_mode: mode });
+    document.querySelectorAll(".mode-btn").forEach(b =>
+      b.classList.toggle("active", b.dataset.mode === mode)
+    );
+  }
+
+  function clearLogs() {
+    if (!confirm("Effacer tous les logs et statistiques ?")) return;
+    chrome.runtime.sendMessage({ source: "llm-guard", type: "clearLogs" }, () => { loadStats(); loadLogs(); });
+  }
+
+  function exportLogs() {
+    chrome.runtime.sendMessage({ source: "llm-guard", type: "getLogs" }, (r) => {
+      chrome.runtime.sendMessage({ source: "llm-guard", type: "getStats" }, (sr) => {
+        const data = {
+          exportDate: new Date().toISOString(),
+          extension: "LLM Guard v2.0.0",
+          stats: sr?.stats || {},
+          logs: r?.logs || [],
+        };
+        const blob = new Blob([JSON.stringify(data, null, 2)], { type: "application/json" });
+        const url = URL.createObjectURL(blob);
+        const a = document.createElement("a");
+        a.href = url;
+        a.download = `llm-guard-export-${new Date().toISOString().slice(0,10)}.json`;
+        a.click();
+        URL.revokeObjectURL(url);
+      });
+    });
+  }
+
+  function escapeHtml(t) { const d = document.createElement("div"); d.textContent = t; return d.innerHTML; }
+</script>
+</body>
+</html>
