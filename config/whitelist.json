@@ -1,0 +1,8 @@
+{
+  "description": "Patterns exempted from PII detection. These will NEVER be flagged.",
+  "entries": [
+    { "type": "domain",  "pattern": "acme-corp.com" },
+    { "type": "email",   "pattern": ".*@acme-corp\\.com", "isRegex": true },
+    { "type": "keyword", "pattern": "Project Phoenix" }
+  ]
+}

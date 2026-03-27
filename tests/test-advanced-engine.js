@@ -5,13 +5,12 @@
  * Usage : node tests/test-advanced-engine.js
  */
 
+const { levenshtein, normalize } = require("../utils.js");
 const {
   scanRegex,
   scanFuzzy,
   detectObfuscation,
   scanContextual,
-  levenshtein,
-  normalize,
 } = require("../advanced-engine.js");
 
 let passed = 0, failed = 0, total = 0;

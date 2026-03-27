@@ -1,0 +1,8 @@
+{
+  "description": "Company-specific sensitive terms. These will ALWAYS be flagged.",
+  "entries": [
+    { "term": "Project Titan",     "category": "Projet confidentiel", "severity": "high" },
+    { "term": "Operation Midnight", "category": "Projet confidentiel", "severity": "critical" },
+    { "term": "client-\\d+\\.internal", "category": "Infrastructure interne", "severity": "medium", "isRegex": true }
+  ]
+}
