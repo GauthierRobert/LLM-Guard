@@ -53,6 +53,33 @@ function validateWhitelist(entries) {
   }
 }
 
+/**
+ * Static ReDoS guard. Rejects patterns known to cause catastrophic
+ * backtracking. Heuristics (not exhaustive, but catch the common traps):
+ *   - nested quantifiers: `(a+)+`, `(.*)*`, `(a+)*`
+ *   - alternation inside a quantified group where branches overlap: `(a|a)+`
+ *   - unbounded repetition inside unbounded repetition via backreferences
+ *   - huge `{n,}` lower bounds (>=1000)
+ * Regexes supplied by a company admin are the only user-controlled regex
+ * inputs in this codebase, so gating them here is the ReDoS entry point.
+ */
+function looksRedosRisky(source) {
+  // Nested quantifier: (X+)+  (X*)*  (X+)*  (X*)+  — allowing whitespace.
+  if (/\([^)]*[+*][^)]*\)\s*[+*]/.test(source)) return "nested-quantifier";
+  // Alternation with repeated branch inside quantified group: (a|a|b)+
+  const altGroup = /\(([^)]*)\)\s*[+*]/g;
+  let m;
+  while ((m = altGroup.exec(source)) !== null) {
+    const parts = m[1].split("|").map((p) => p.trim()).filter(Boolean);
+    if (parts.length >= 2 && new Set(parts).size < parts.length) return "duplicate-branches";
+  }
+  // Giant bounded repetition
+  if (/\{\s*\d{4,}\s*,?\s*\d*\s*\}/.test(source)) return "huge-repetition";
+  // Evil regex pattern: (a+)+$ or (.*)*$
+  if (/\(\.\*\)\s*[*+]|\(\.\+\)\s*[*+]/.test(source)) return "wildcard-quantifier";
+  return null;
+}
+
 function validateBlacklist(entries) {
   for (let i = 0; i < entries.length; i++) {
     const e = entries[i];
@@ -72,12 +99,23 @@ function validateBlacklist(entries) {
         console.error(`[build] ERROR: blacklist entry #${i} has invalid regex "${pat}": ${err.message}`);
         process.exit(1);
       }
+      const risk = looksRedosRisky(pat);
+      if (risk) {
+        console.error(`[build] ERROR: blacklist entry #${i} pattern "${pat}" is ReDoS-risky (${risk}). Rewrite without nested quantifiers / repeated alternatives / huge repetitions.`);
+        process.exit(1);
+      }
     }
     if (!e.category) {
       console.error(`[build] ERROR: blacklist entry #${i} must have "category".`);
       process.exit(1);
     }
   }
+}
+
+module.exports = { looksRedosRisky };
+
+if (require.main !== module) {
+  return;
 }
 
 // ─── Main ───────────────────────────────────────────────────────

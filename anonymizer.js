@@ -12,11 +12,65 @@
  * `makeStreamDeanonymizer()`, plus the accumulated maps for introspection.
  */
 
-function createAnonymizer({ patterns, isAllowlisted = () => false, maxMapSize = 5000, onOverflow = null }) {
+function createAnonymizer({
+  patterns,
+  isAllowlisted = () => false,
+  maxMapSize = 5000,
+  onOverflow = null,
+  placeholderStrategy = "counter",
+  sessionSalt = null,
+}) {
   const anonymizationMap = new Map();
   const reverseMap = new Map();
   const placeholderCounters = new Map();
   const state = { maxPlaceholderLen: 0, overflowReported: false };
+
+  // Session salt for hashed-placeholder mode. Prevents an attacker who can
+  // observe one session's placeholders (e.g. [EMAIL_a1b2]) from predicting
+  // another user's mapping.
+  const effectiveSalt = sessionSalt || generateSalt();
+
+  function generateSalt() {
+    try {
+      if (typeof crypto !== "undefined" && crypto.getRandomValues) {
+        const bytes = new Uint8Array(8);
+        crypto.getRandomValues(bytes);
+        return Array.from(bytes, (b) => b.toString(16).padStart(2, "0")).join("");
+      }
+    } catch { /* fall through */ }
+    return Math.random().toString(36).slice(2, 18);
+  }
+
+  // FNV-1a 32-bit; returns 6 lowercase hex chars. 16M namespace + collision
+  // fallback below keeps the placeholder stable per (salt, value).
+  function fnv1aHex(str) {
+    let h = 2166136261 >>> 0;
+    for (let i = 0; i < str.length; i++) {
+      h ^= str.charCodeAt(i);
+      h = Math.imul(h, 16777619) >>> 0;
+    }
+    return h.toString(16).padStart(8, "0").slice(0, 6);
+  }
+
+  function mintPlaceholder(pattern, original) {
+    if (placeholderStrategy === "hashed") {
+      const base = pattern.placeholder.replace("§", fnv1aHex(effectiveSalt + ":" + original));
+      // Collision check: same hash but different original within this session.
+      const existing = anonymizationMap.get(base);
+      if (!existing || existing === original) return base;
+      let i = 2;
+      while (true) {
+        const candidate = base.replace(/\]$/, `_${i}]`);
+        const clash = anonymizationMap.get(candidate);
+        if (!clash || clash === original) return candidate;
+        i++;
+      }
+    }
+    // Default: monotonically increasing per-pattern counter.
+    const next = (placeholderCounters.get(pattern.placeholder) || 0) + 1;
+    placeholderCounters.set(pattern.placeholder, next);
+    return pattern.placeholder.replace("§", next);
+  }
 
   function trimMap(map) {
     if (map.size <= maxMapSize) return;
@@ -38,9 +92,7 @@ function createAnonymizer({ patterns, isAllowlisted = () => false, maxMapSize = 
 
         let placeholder = reverseMap.get(original);
         if (!placeholder) {
-          const next = (placeholderCounters.get(pattern.placeholder) || 0) + 1;
-          placeholderCounters.set(pattern.placeholder, next);
-          placeholder = pattern.placeholder.replace("§", next);
+          placeholder = mintPlaceholder(pattern, original);
           anonymizationMap.set(placeholder, original);
           reverseMap.set(original, placeholder);
           if (placeholder.length > state.maxPlaceholderLen) {

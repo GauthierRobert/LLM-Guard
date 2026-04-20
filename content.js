@@ -11,7 +11,7 @@
   // ─── Shared modules (loaded by manifest before this file) ──
   const { PII_PATTERNS } = window.__llmGuard.patterns;
   const { SENSITIVE_KEYWORDS } = window.__llmGuard.keywords;
-  const { maskPII, levenshtein, normalize, sha256Hex } = window.__llmGuard.utils;
+  const { maskPII, levenshtein, normalize, sha256Hex, fnv1aHex, createLRU } = window.__llmGuard.utils;
   const { showBanner, addStatusBadge, logEvent } = window.__llmGuard.ui;
   const { CONTEXT_RULES } = window.__llmGuard.contextRules;
   const { SENSITIVE_KEYWORDS_CATEGORIZED } = window.__llmGuard.keywordsCategorized;
@@ -105,12 +105,14 @@
     if (evt.data.type === "layer4Update") {
       const next = evt.data.layer4 || {};
       const urlChanged = next.presidioUrl !== CONFIG.layer4.presidioUrl;
+      const enabledChanged = !!next.enabled !== CONFIG.layer4.enabled;
       CONFIG.layer4 = {
         enabled: !!next.enabled,
         presidioUrl: next.presidioUrl || "",
       };
       // Force re-init on next scan if URL changed or toggle flipped
       if (urlChanged) layer4Instance = null;
+      if (urlChanged || enabledChanged) invalidateScanCache();
     }
 
     if (evt.data.type === "attachmentConfigUpdate") {
@@ -134,6 +136,7 @@
     patterns: PII_PATTERNS,
     isAllowlisted,
     maxMapSize: CONFIG.maxMapSize,
+    placeholderStrategy: "hashed",
     onOverflow: (size) => {
       console.warn(`[LLM Guard] Anonymization map exceeded ${CONFIG.maxMapSize} entries; oldest mappings evicted. De-anonymization of old turns may fail.`);
       logEvent({ action: "MAP_OVERFLOW", mappingsCount: size }, ACTIVE_LLM);
@@ -255,8 +258,22 @@
     }
   }
 
+  // ─── Detection cache ─────────────────────────────────────────
+  // Short-circuits the full pipeline when the same prompt is scanned twice
+  // in quick succession. Typical triggers: a user clicks Send twice, the
+  // site retries a failed request, or a streaming UI resubmits the prompt.
+  // Cleared when layer4 or attachment config changes — those are the only
+  // config knobs that affect findings.
+  const scanCache = createLRU(200);
+  const cacheKey = (text) => fnv1aHex(text) + ":" + fnv1aHex(text.length + "|" + (CONFIG.layer4.enabled ? 1 : 0));
+  function invalidateScanCache() { scanCache.clear(); }
+
   // ─── Scanner (all layers active) ─────────────────────────────
   async function scanForPII(text) {
+    const key = cacheKey(text);
+    const cached = scanCache.get(key);
+    if (cached) return cached.map((f) => ({ ...f, cached: true }));
+
     const findings = [];
 
     // Layer 1: Regex
@@ -317,6 +334,7 @@
       findings.push(...(await scanLayer4(text)));
     }
 
+    scanCache.set(key, findings);
     return findings;
   }
 

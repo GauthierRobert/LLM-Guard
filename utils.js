@@ -73,6 +73,45 @@
     return Array.from(new Uint8Array(digest), (b) => b.toString(16).padStart(2, "0")).join("");
   }
 
+  function fnv1aHex(str) {
+    let h = 2166136261 >>> 0;
+    for (let i = 0; i < str.length; i++) {
+      h ^= str.charCodeAt(i);
+      h = Math.imul(h, 16777619) >>> 0;
+    }
+    return h.toString(16).padStart(8, "0");
+  }
+
+  /**
+   * Minimal Map-based LRU. Cheaper than a linked list and good enough for
+   * the handful of hundred-entry caches we need. `get` re-inserts to refresh
+   * recency; `set` evicts the oldest key when capacity is hit.
+   */
+  function createLRU(capacity) {
+    const cap = Math.max(1, capacity | 0);
+    const map = new Map();
+    return {
+      get(key) {
+        if (!map.has(key)) return undefined;
+        const val = map.get(key);
+        map.delete(key);
+        map.set(key, val);
+        return val;
+      },
+      set(key, val) {
+        if (map.has(key)) map.delete(key);
+        map.set(key, val);
+        if (map.size > cap) {
+          const oldest = map.keys().next().value;
+          map.delete(oldest);
+        }
+      },
+      has(key) { return map.has(key); },
+      get size() { return map.size; },
+      clear() { map.clear(); },
+    };
+  }
+
   function formatBytes(n) {
     if (!Number.isFinite(n) || n < 0) return "";
     if (n < 1024) return `${n} B`;
@@ -84,11 +123,11 @@
   // Browser (Chrome MAIN world)
   if (typeof window !== "undefined") {
     window.__llmGuard = window.__llmGuard || {};
-    window.__llmGuard.utils = { levenshtein, normalize, maskPII, getMaxSeverity, deduplicateFindings, sha256Hex, formatBytes };
+    window.__llmGuard.utils = { levenshtein, normalize, maskPII, getMaxSeverity, deduplicateFindings, sha256Hex, formatBytes, fnv1aHex, createLRU };
   }
 
   // Node.js (tests)
   if (typeof module !== "undefined" && module.exports) {
-    module.exports = { levenshtein, normalize, maskPII, getMaxSeverity, deduplicateFindings, sha256Hex, formatBytes };
+    module.exports = { levenshtein, normalize, maskPII, getMaxSeverity, deduplicateFindings, sha256Hex, formatBytes, fnv1aHex, createLRU };
   }
 })();
