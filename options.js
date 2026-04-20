@@ -20,12 +20,14 @@ const FIELDS = [
 
 document.addEventListener("DOMContentLoaded", async () => {
   await loadConfig();
+  await loadLayer4Config();
   await loadState();
 
   $("btn-save").addEventListener("click", saveConfig);
   $("btn-flush").addEventListener("click", flushNow);
   $("btn-test").addEventListener("click", testConnection);
   $("btn-regenerate").addEventListener("click", regenerateDeviceId);
+  $("btn-layer4-test").addEventListener("click", testLayer4);
 
   // Refresh state every 5s while the page is open.
   setInterval(loadState, 5000);
@@ -52,9 +54,46 @@ async function saveConfig() {
   if (patch.backendUrl && !/^https?:\/\//i.test(patch.backendUrl)) {
     return showStatus("L'URL doit commencer par http:// ou https://", "err");
   }
+
+  const layer4Url = $("opt-layer4-presidio-url").value.trim();
+  if (layer4Url && !/^https?:\/\//i.test(layer4Url)) {
+    return showStatus("L'URL Presidio doit commencer par http:// ou https://", "err");
+  }
+
   const saved = await sendMsg({ type: "telemetry.setConfig", patch });
   if (saved?.deviceId) $("opt-device-id").value = saved.deviceId;
+
+  await chrome.storage.local.set({
+    guard_layer4: {
+      enabled: $("opt-layer4-enabled").checked,
+      presidioUrl: layer4Url,
+    },
+  });
+
   showStatus("Configuration enregistrée.", "ok");
+}
+
+async function loadLayer4Config() {
+  const { guard_layer4 } = await chrome.storage.local.get(["guard_layer4"]);
+  const cfg = guard_layer4 || { enabled: false, presidioUrl: "" };
+  $("opt-layer4-enabled").checked = !!cfg.enabled;
+  $("opt-layer4-presidio-url").value = cfg.presidioUrl || "";
+}
+
+async function testLayer4() {
+  const url = $("opt-layer4-presidio-url").value.trim();
+  const statusEl = $("layer4-status");
+  if (!url) {
+    statusEl.textContent = "URL manquante";
+    return;
+  }
+  statusEl.textContent = "Test…";
+  try {
+    const res = await fetch(url.replace(/\/+$/, "") + "/health", { method: "GET" });
+    statusEl.textContent = res.ok ? `OK (HTTP ${res.status})` : `Échec (HTTP ${res.status})`;
+  } catch (err) {
+    statusEl.textContent = `Échec: ${err?.message || err}`;
+  }
 }
 
 async function loadState() {

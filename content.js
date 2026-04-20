@@ -62,80 +62,54 @@
   const CONFIG = {
     mode: "anonymize",
     bannerDuration: 8000,
-    maxMapSize: 500,
+    maxMapSize: 5000,
+    layer4: { enabled: false, presidioUrl: "" },
   };
 
-  // Sync mode from storage via bridge
+  // Sync mode + layer4 config from storage via bridge
   window.addEventListener("message", (evt) => {
     if (evt.source !== window) return;
-    if (evt.data?.source !== "llm-guard-bridge" || evt.data?.type !== "modeUpdate") return;
-    const m = evt.data.mode;
-    if (m === "anonymize" || m === "block") CONFIG.mode = m;
-    const badge = document.getElementById("llm-guard-badge");
-    if (badge) {
-      badge.title = `LLM Guard — ${ACTIVE_LLM.name} | mode: ${CONFIG.mode} (cliquez pour changer)`;
-      badge.style.background = CONFIG.mode === "block" ? "#A32D2D" : ACTIVE_LLM.color;
+    if (evt.data?.source !== "llm-guard-bridge") return;
+
+    if (evt.data.type === "modeUpdate") {
+      const m = evt.data.mode;
+      if (m === "anonymize" || m === "block") CONFIG.mode = m;
+      const badge = document.getElementById("llm-guard-badge");
+      if (badge) {
+        badge.title = `LLM Guard — ${ACTIVE_LLM.name} | mode: ${CONFIG.mode} (cliquez pour changer)`;
+        badge.style.background = CONFIG.mode === "block" ? "#A32D2D" : ACTIVE_LLM.color;
+      }
+    }
+
+    if (evt.data.type === "layer4Update") {
+      const next = evt.data.layer4 || {};
+      const urlChanged = next.presidioUrl !== CONFIG.layer4.presidioUrl;
+      CONFIG.layer4 = {
+        enabled: !!next.enabled,
+        presidioUrl: next.presidioUrl || "",
+      };
+      // Force re-init on next scan if URL changed or toggle flipped
+      if (urlChanged) layer4Instance = null;
     }
   });
 
   window.postMessage({ source: "llm-guard", type: "getMode" }, window.location.origin);
 
   // ─── Anonymisation ───────────────────────────────────────────
-  let anonymizationMap = new Map();
-  let reverseMap = new Map();
+  // Shared engine from anonymizer.js — see that file for the fix notes
+  // on cross-prompt placeholder collisions and stream chunk-boundary loss.
+  const anonymizer = window.__llmGuard.anonymizer.createAnonymizer({
+    patterns: PII_PATTERNS,
+    isAllowlisted,
+    maxMapSize: CONFIG.maxMapSize,
+    onOverflow: (size) => {
+      console.warn(`[LLM Guard] Anonymization map exceeded ${CONFIG.maxMapSize} entries; oldest mappings evicted. De-anonymization of old turns may fail.`);
+      logEvent({ action: "MAP_OVERFLOW", mappingsCount: size }, ACTIVE_LLM);
+    },
+  });
 
-  function trimMap(map, maxSize) {
-    if (map.size <= maxSize) return;
-    const excess = map.size - maxSize;
-    const iter = map.keys();
-    for (let i = 0; i < excess; i++) {
-      map.delete(iter.next().value);
-    }
-  }
-
-  function anonymizeText(text) {
-    let result = text;
-    const newMap = new Map();
-    const newReverse = new Map();
-    let globalCounter = 0;
-
-    for (const pattern of PII_PATTERNS) {
-      const regex = new RegExp(pattern.regex.source, pattern.regex.flags);
-      let match;
-      while ((match = regex.exec(result)) !== null) {
-        const original = match[0];
-        if (newReverse.has(original)) continue;
-        if (isAllowlisted(original, pattern.name)) continue;
-
-        globalCounter++;
-        const placeholder = pattern.placeholder.replace("§", globalCounter);
-        newMap.set(placeholder, original);
-        newReverse.set(original, placeholder);
-      }
-    }
-
-    const sortedEntries = [...newReverse.entries()].sort(
-      (a, b) => b[0].length - a[0].length
-    );
-    for (const [original, placeholder] of sortedEntries) {
-      result = result.split(original).join(placeholder);
-    }
-
-    anonymizationMap = new Map([...anonymizationMap, ...newMap]);
-    reverseMap = new Map([...reverseMap, ...newReverse]);
-    trimMap(anonymizationMap, CONFIG.maxMapSize);
-    trimMap(reverseMap, CONFIG.maxMapSize);
-
-    return { anonymized: result, mappings: newMap, changed: newMap.size > 0 };
-  }
-
-  function deanonymizeText(text) {
-    let result = text;
-    for (const [placeholder, original] of anonymizationMap) {
-      result = result.split(placeholder).join(original);
-    }
-    return result;
-  }
+  function anonymizeText(text) { return anonymizer.anonymize(text); }
+  function deanonymizeText(text) { return anonymizer.deanonymize(text); }
 
   // ─── Layer 3: Contextual scanning ────────────────────────────
   function scanContextual(text) {
@@ -202,8 +176,55 @@
     return findings;
   }
 
+  // ─── Layer 4: Local NLP (Presidio) ───────────────────────────
+  let layer4Instance = null;
+  let layer4InitPromise = null;
+
+  async function getLayer4() {
+    if (!CONFIG.layer4.enabled || !CONFIG.layer4.presidioUrl) return null;
+    if (layer4Instance?.activeClassifier) return layer4Instance;
+    if (layer4InitPromise) return layer4InitPromise;
+    const factory = window.__llmGuard?.layer4?.Layer4Classifier;
+    if (!factory) return null;
+    layer4InitPromise = (async () => {
+      const inst = new factory({
+        presidioUrl: CONFIG.layer4.presidioUrl,
+        enableBrowserNLP: false,
+      });
+      await inst.init();
+      layer4Instance = inst;
+      layer4InitPromise = null;
+      return inst.activeClassifier ? inst : null;
+    })();
+    return layer4InitPromise;
+  }
+
+  async function scanLayer4(text) {
+    const inst = await getLayer4();
+    if (!inst) return [];
+    try {
+      const raw = await inst.classify(text);
+      const findings = [];
+      for (const r of raw) {
+        const sample = (r.matches && r.matches[0]) || "";
+        if (sample && isAllowlisted(sample, r.type)) continue;
+        findings.push({
+          type: r.type,
+          severity: r.severity || "medium",
+          count: 1,
+          samples: r.matches ? r.matches.map(maskPII) : [],
+          layer: r.layer || "layer4",
+        });
+      }
+      return findings;
+    } catch (err) {
+      console.warn("[LLM Guard] Layer 4 scan failed:", err?.message || err);
+      return [];
+    }
+  }
+
   // ─── Scanner (all layers active) ─────────────────────────────
-  function scanForPII(text) {
+  async function scanForPII(text) {
     const findings = [];
 
     // Layer 1: Regex
@@ -259,6 +280,11 @@
     // Layer 3: Contextual rules
     findings.push(...scanContextual(text));
 
+    // Layer 4: Local NLP (Presidio) — opt-in, configured in options page
+    if (CONFIG.layer4.enabled) {
+      findings.push(...(await scanLayer4(text)));
+    }
+
     return findings;
   }
 
@@ -310,7 +336,7 @@
 
     // Use generic adapter for prompt extraction
     const promptText = extractPrompt(bodyText, ACTIVE_LLM.adapter);
-    const findings = scanForPII(promptText);
+    const findings = await scanForPII(promptText);
 
     if (findings.length === 0) {
       logEvent({
@@ -373,10 +399,11 @@
   };
 
   // ─── Response de-anonymization ───────────────────────────────
-  // Wraps the LLM response to replace placeholders back to original values.
-  // Only applies if we have active anonymization mappings.
+  // Buffers across chunks so a placeholder split across a boundary
+  // (e.g. "[EMA" | "IL_1]") is still restored. The buffering rule lives
+  // in anonymizer.js (makeStreamDeanonymizer).
   function wrapResponseForDeanonymization(response) {
-    if (anonymizationMap.size === 0) return response;
+    if (anonymizer.anonymizationMap.size === 0) return response;
 
     const originalBody = response.body;
     if (!originalBody) return response;
@@ -384,17 +411,20 @@
     const reader = originalBody.getReader();
     const decoder = new TextDecoder();
     const encoder = new TextEncoder();
+    const streamDeanon = anonymizer.makeStreamDeanonymizer();
 
     const stream = new ReadableStream({
       async pull(controller) {
         const { done, value } = await reader.read();
         if (done) {
+          const trailing = decoder.decode();
+          const emit = (trailing ? streamDeanon.push(trailing) : "") + streamDeanon.flush();
+          if (emit.length > 0) controller.enqueue(encoder.encode(emit));
           controller.close();
           return;
         }
-        const text = decoder.decode(value, { stream: true });
-        const restored = deanonymizeText(text);
-        controller.enqueue(encoder.encode(restored));
+        const emit = streamDeanon.push(decoder.decode(value, { stream: true }));
+        if (emit.length > 0) controller.enqueue(encoder.encode(emit));
       },
     });
 

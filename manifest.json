@@ -28,7 +28,7 @@
         "https://gemini.google.com/*",
         "https://copilot.microsoft.com/*"
       ],
-      "js": ["rules/pii-patterns.js", "rules/sensitive-keywords.js", "rules/sensitive-keywords-categorized.js", "rules/context-rules.js", "config/company-rules.js", "rules/allowlist.js", "utils.js", "ui.js", "llm-adapters.js", "content.js"],
+      "js": ["rules/pii-patterns.js", "rules/sensitive-keywords.js", "rules/sensitive-keywords-categorized.js", "rules/context-rules.js", "config/company-rules.js", "rules/allowlist.js", "utils.js", "ui.js", "llm-adapters.js", "layer4-local.js", "anonymizer.js", "content.js"],
       "run_at": "document_start",
       "world": "MAIN"
     },

@@ -15,6 +15,8 @@ node tests/test-llm-adapters.js        # 18 LLM adapter extract/inject tests
 node tests/test-allowlist.js           # 6 allowlist/exemption tests
 node tests/test-company-rules.js       # 25 company whitelist/blacklist tests
 node tests/test-telemetry.js           # 16 telemetry (scrub, batching, retry) tests
+node tests/test-anonymizer.js          # 9 anonymizer tests (cross-prompt collisions, stream chunk fix)
+node tests/test-layer4-wiring.js       # 8 Layer 4 tests (Presidio classifier + orchestrator)
 ```
 
 No linting or formatting toolchain is configured.

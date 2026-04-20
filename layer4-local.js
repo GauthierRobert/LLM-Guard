@@ -1,6 +1,10 @@
 /**
  * LLM Guard — Couche 4 : NLP local (pas d'appel cloud)
- * 
+ *
+ * Dual-context: runs as a MAIN-world content script (attaches classes to
+ * window.__llmGuard.layer4) AND as a Node.js module (module.exports at bottom)
+ * so the same code is used in production and in unit tests.
+ *
  * 3 options selon votre contexte, de la plus légère à la plus puissante :
  * 
  * Option A : transformers.js dans le navigateur (ONNX, ~50MB de modèle)
@@ -441,6 +445,16 @@ class Layer4Classifier {
 
 if (typeof module !== "undefined" && module.exports) {
   module.exports = {
+    BrowserNLPClassifier,
+    PresidioClassifier,
+    OllamaClassifier,
+    Layer4Classifier,
+  };
+}
+
+if (typeof window !== "undefined") {
+  window.__llmGuard = window.__llmGuard || {};
+  window.__llmGuard.layer4 = {
     BrowserNLPClassifier,
     PresidioClassifier,
     OllamaClassifier,
