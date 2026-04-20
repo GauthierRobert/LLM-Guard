@@ -150,7 +150,28 @@ const output = `/**
 
   var COMPANY_BLACKLIST = ${JSON.stringify(blacklistKeywords, null, 2).replace(/\n/g, "\n  ")};
 
-  var COMPANY_BLACKLIST_REGEX = ${JSON.stringify(blacklistRegex, null, 2).replace(/\n/g, "\n  ")};
+  var COMPANY_BLACKLIST_REGEX_RAW = ${JSON.stringify(blacklistRegex, null, 2).replace(/\n/g, "\n  ")};
+
+  // Runtime validation: the build-time checks already ran, but if a
+  // hand-edited config/company-rules.js slips through, or a shipped
+  // extension runs on an older engine whose regex semantics differ, we
+  // still want detection to continue instead of throwing inside scanForPII.
+  // We compile each regex here and drop anything that fails, with a warning.
+  var COMPANY_BLACKLIST_REGEX = [];
+  for (var i = 0; i < COMPANY_BLACKLIST_REGEX_RAW.length; i++) {
+    var entry = COMPANY_BLACKLIST_REGEX_RAW[i];
+    try {
+      // Validate compilation — the result isn't kept, we pass the pattern
+      // string to scanForPII which recompiles with scan-time flags.
+      new RegExp(entry.pattern, "gi");
+      COMPANY_BLACKLIST_REGEX.push(entry);
+    } catch (err) {
+      var msg = "[LLM Guard] Invalid company blacklist regex at index " + i +
+        " (pattern=" + JSON.stringify(entry.pattern) + "): " + (err && err.message ? err.message : err) +
+        ". This rule is disabled.";
+      if (typeof console !== "undefined" && console.warn) console.warn(msg);
+    }
+  }
 
   // Browser (Chrome MAIN world)
   if (typeof window !== "undefined") {

@@ -4,6 +4,7 @@ import com.llmguard.api.api.dto.StatsResponseDto;
 import com.llmguard.api.config.AppProperties;
 import com.llmguard.api.persistence.EventEntity;
 import com.llmguard.api.persistence.EventRepository;
+import jakarta.validation.constraints.Pattern;
 import java.time.Duration;
 import java.time.OffsetDateTime;
 import java.time.ZoneOffset;
@@ -11,22 +12,36 @@ import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 import org.springframework.data.domain.PageRequest;
+import org.springframework.http.HttpStatus;
 import org.springframework.security.core.Authentication;
 import org.springframework.security.oauth2.jwt.Jwt;
+import org.springframework.validation.annotation.Validated;
+import org.springframework.web.bind.annotation.ExceptionHandler;
 import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RequestParam;
+import org.springframework.web.bind.annotation.ResponseStatus;
 import org.springframework.web.bind.annotation.RestController;
 
 @RestController
 @RequestMapping("/v1")
+@Validated
 public class QueryController {
+
+    // Strict whitelist of allowed `range` values. Anything else is rejected
+    // with 400 by the @Pattern annotation before any DB call, so operators
+    // cannot trigger full-table scans with arbitrary strings.
+    private static final String RANGE_REGEX = "^(1h|24h|7d|30d)$";
 
     private static final Map<String, Duration> RANGE_MAP = Map.of(
             "1h", Duration.ofHours(1),
             "24h", Duration.ofDays(1),
             "7d", Duration.ofDays(7),
             "30d", Duration.ofDays(30));
+
+    // Clamp page size so a client can't request 10M rows.
+    private static final int MAX_LIMIT = 500;
+    private static final int MIN_LIMIT = 1;
 
     private final EventRepository repo;
     private final AppProperties props;
@@ -38,7 +53,9 @@ public class QueryController {
 
     @GetMapping("/stats")
     public StatsResponseDto stats(
-            @RequestParam(defaultValue = "24h") String range,
+            @RequestParam(defaultValue = "24h")
+            @Pattern(regexp = RANGE_REGEX, message = "range must be one of 1h, 24h, 7d, 30d")
+            String range,
             Authentication authentication) {
         String orgId = orgId(authentication);
         OffsetDateTime since = since(range);
@@ -64,9 +81,11 @@ public class QueryController {
             @RequestParam(required = false) String severity,
             @RequestParam(required = false) String llm,
             @RequestParam(required = false) String action,
-            @RequestParam(defaultValue = "24h") String range,
+            @RequestParam(defaultValue = "24h")
+            @Pattern(regexp = RANGE_REGEX, message = "range must be one of 1h, 24h, 7d, 30d")
+            String range,
             Authentication authentication) {
-        int clamped = Math.clamp(limit, 1, 500);
+        int clamped = Math.clamp(limit, MIN_LIMIT, MAX_LIMIT);
         int skip = Math.max(0, offset);
         int page = skip / clamped;
 
@@ -130,5 +149,13 @@ public class QueryController {
             out.put(String.valueOf(r[0]), ((Number) r[1]).longValue());
         }
         return out;
+    }
+
+    // Return 400 with a short body instead of the default 500 so a client
+    // gets a clear error when it passes a bad `range`.
+    @ExceptionHandler(jakarta.validation.ConstraintViolationException.class)
+    @ResponseStatus(HttpStatus.BAD_REQUEST)
+    public Map<String, String> handleValidation(jakarta.validation.ConstraintViolationException ex) {
+        return Map.of("error", "bad_request", "detail", ex.getMessage());
     }
 }

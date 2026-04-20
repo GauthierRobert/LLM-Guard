@@ -55,6 +55,15 @@ async function saveConfig() {
   if (patch.backendUrl && !/^https?:\/\//i.test(patch.backendUrl)) {
     return showStatus("L'URL doit commencer par http:// ou https://", "err");
   }
+  // Refuse plaintext backends unless the host is localhost/127.x.x.x — the
+  // device token is a long-lived bearer credential and shipping it over
+  // http:// to anything else is almost always a misconfiguration.
+  if (patch.backendUrl && !isSafeInsecureBackend(patch.backendUrl)) {
+    const ok = confirm(
+      "⚠ L'URL du backend utilise HTTP (non chiffré). Le jeton de l'appareil et les métadonnées seront envoyés en clair. Confirmer malgré tout ?"
+    );
+    if (!ok) return showStatus("Enregistrement annulé. Utilisez HTTPS en production.", "err");
+  }
 
   const layer4Url = $("opt-layer4-presidio-url").value.trim();
   if (layer4Url && !/^https?:\/\//i.test(layer4Url)) {
@@ -131,7 +140,16 @@ async function loadState() {
   $("q-last").textContent = state.lastSentAt
     ? new Date(state.lastSentAt).toLocaleString("fr-FR")
     : "Jamais";
-  $("q-err").textContent = state.lastError || "—";
+  const errTxt = state.lastError || "";
+  const errAt = state.lastErrorAt
+    ? ` (${new Date(state.lastErrorAt).toLocaleString("fr-FR")})`
+    : "";
+  $("q-err").textContent = errTxt ? errTxt + errAt : "—";
+  const evicted = state.evictedCount || 0;
+  $("q-evicted").textContent = evicted > 0
+    ? `${evicted}${state.lastEvictionAt ? " (dernière: " + new Date(state.lastEvictionAt).toLocaleString("fr-FR") + ")" : ""}`
+    : "0";
+  $("q-flush-stats").textContent = `${state.totalFlushSuccesses || 0} / ${state.totalFlushAttempts || 0}`;
 }
 
 async function flushNow() {
@@ -163,6 +181,26 @@ function showStatus(msg, kind) {
   el.textContent = msg;
   el.className = "status" + (kind ? " " + kind : "");
   if (kind === "ok") setTimeout(() => { el.textContent = ""; el.className = "status"; }, 3000);
+}
+
+function isSafeInsecureBackend(urlStr) {
+  // Only allow http:// when the host is clearly a loopback / private dev box.
+  try {
+    const u = new URL(urlStr);
+    if (u.protocol === "https:") return true;
+    if (u.protocol !== "http:") return false;
+    const h = u.hostname;
+    if (h === "localhost") return true;
+    if (h === "::1") return true;
+    if (/^127\./.test(h)) return true;
+    // Private IPv4 ranges used on corporate dev networks
+    if (/^10\./.test(h)) return true;
+    if (/^192\.168\./.test(h)) return true;
+    if (/^172\.(1[6-9]|2\d|3[01])\./.test(h)) return true;
+    return false;
+  } catch {
+    return false;
+  }
 }
 
 function sendMsg(payload) {

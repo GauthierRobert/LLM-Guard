@@ -17,7 +17,13 @@ function createAnonymizer({
   isAllowlisted = () => false,
   maxMapSize = 5000,
   onOverflow = null,
-  placeholderStrategy = "counter",
+  // Default to "hashed": placeholders embed fnv1a(salt + value) so the same
+  // original gets the same placeholder within a session, and collisions
+  // between different originals are vanishingly rare. The legacy "counter"
+  // strategy has a cross-prompt collision class where two turns can both
+  // start at [EMAIL_1] and de-anonymize to the wrong address when the caller
+  // reuses an old mapping.
+  placeholderStrategy = "hashed",
   sessionSalt = null,
 }) {
   const anonymizationMap = new Map();
