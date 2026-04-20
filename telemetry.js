@@ -121,6 +121,13 @@ function scrub(event, config) {
       ? event.anonymizedPreview.slice(0, 200)
       : null;
 
+  const ALLOWED_ACTIONS = [
+    "CLEAN", "ANONYMIZED", "PII_DETECTED", "BLOCKED",
+    "ATTACHMENT_CLEAN", "ATTACHMENT_PII_DETECTED", "ATTACHMENT_BLOCKED",
+    "ATTACHMENT_DETECTED", "ATTACHMENT_UNSCANNED",
+  ];
+  const action = ALLOWED_ACTIONS.includes(event.action) ? event.action : "CLEAN";
+
   return {
     eventId: randomUuid(),
     deviceId: config.deviceId || "",
@@ -129,17 +136,31 @@ function scrub(event, config) {
     timestamp: event.timestamp || new Date().toISOString(),
     hostname,
     llm: ["ChatGPT", "Claude", "Gemini", "Copilot"].includes(event.llm) ? event.llm : "Unknown",
-    action: ["CLEAN", "ANONYMIZED", "PII_DETECTED", "BLOCKED"].includes(event.action)
-      ? event.action
-      : "CLEAN",
+    action,
     endpoint: typeof event.endpoint === "string" ? event.endpoint.slice(0, 512) : null,
     mode: event.mode === "block" ? "block" : "anonymize",
     promptLength: Number.isFinite(event.promptLength) ? event.promptLength | 0 : 0,
     mappingsCount: Number.isFinite(event.mappingsCount) ? event.mappingsCount | 0 : 0,
     anonymizedPreview,
     findings,
+    attachment: scrubAttachment(event.attachment),
     extensionVersion: EXTENSION_VERSION,
     schemaVersion: 1,
+  };
+}
+
+function scrubAttachment(a) {
+  if (!a || typeof a !== "object") return null;
+  const sha256 = typeof a.sha256 === "string" && /^[a-f0-9]{0,64}$/i.test(a.sha256) ? a.sha256.slice(0, 64) : "";
+  return {
+    sha256,
+    mimeType: typeof a.mimeType === "string" ? a.mimeType.slice(0, 128) : "",
+    sizeBytes: Number.isFinite(a.sizeBytes) ? Math.max(0, a.sizeBytes | 0) : 0,
+    extractedChars: Number.isFinite(a.extractedChars) ? Math.max(0, a.extractedChars | 0) : 0,
+    truncated: !!a.truncated,
+    extractorId: typeof a.extractorId === "string" ? a.extractorId.slice(0, 32) : null,
+    unavailable: !!a.unavailable,
+    passwordProtected: !!a.passwordProtected,
   };
 }
 

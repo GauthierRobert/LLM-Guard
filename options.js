@@ -21,6 +21,7 @@ const FIELDS = [
 document.addEventListener("DOMContentLoaded", async () => {
   await loadConfig();
   await loadLayer4Config();
+  await loadAttachmentConfig();
   await loadState();
 
   $("btn-save").addEventListener("click", saveConfig);
@@ -70,7 +71,34 @@ async function saveConfig() {
     },
   });
 
+  const maxMb = parseFloat($("opt-attachment-max-mb").value);
+  await chrome.storage.local.set({
+    guard_attachment: {
+      enabled: $("opt-attachment-enabled").checked,
+      mode: $("opt-attachment-mode").value,
+      maxSizeBytes: Number.isFinite(maxMb) && maxMb > 0 ? Math.round(maxMb * 1024 * 1024) : 20 * 1024 * 1024,
+      types: {
+        pdf: $("opt-attachment-pdf").checked,
+        image: $("opt-attachment-image").checked,
+        text: $("opt-attachment-text").checked,
+      },
+    },
+  });
+
   showStatus("Configuration enregistrée.", "ok");
+}
+
+async function loadAttachmentConfig() {
+  const { guard_attachment } = await chrome.storage.local.get(["guard_attachment"]);
+  const cfg = guard_attachment || {};
+  const types = cfg.types || {};
+  $("opt-attachment-enabled").checked = cfg.enabled !== false;
+  $("opt-attachment-mode").value = ["inherit", "block", "warn"].includes(cfg.mode) ? cfg.mode : "inherit";
+  $("opt-attachment-pdf").checked = types.pdf !== false;
+  $("opt-attachment-image").checked = types.image !== false;
+  $("opt-attachment-text").checked = types.text !== false;
+  const mb = Number.isFinite(cfg.maxSizeBytes) ? (cfg.maxSizeBytes / (1024 * 1024)) : 20;
+  $("opt-attachment-max-mb").value = String(mb);
 }
 
 async function loadLayer4Config() {

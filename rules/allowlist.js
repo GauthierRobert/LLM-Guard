@@ -66,6 +66,25 @@
     customAllowlist = parseEntries(entries);
   }
 
+  /**
+   * Check whether a previously-scanned attachment was marked safe.
+   * The "mark safe" action in the banner stores an entry of the form
+   * `{ type: "attachment", pattern: "<sha256>" }`.
+   */
+  function isAttachmentAllowlisted(sha256, filename) {
+    const allRules = [...DEFAULT_ALLOWLIST, ...companyAllowlist, ...customAllowlist];
+    for (const rule of allRules) {
+      if (rule.type !== "attachment") continue;
+      if (rule.pattern instanceof RegExp) {
+        if (rule.pattern.test(sha256) || (filename && rule.pattern.test(filename))) return true;
+      } else if (typeof rule.pattern === "string") {
+        if (rule.pattern === sha256) return true;
+        if (filename && rule.pattern.toLowerCase() === String(filename).toLowerCase()) return true;
+      }
+    }
+    return false;
+  }
+
   // Auto-load company whitelist if available (company-rules.js loads before this file)
   if (typeof window !== "undefined" && window.__llmGuard && window.__llmGuard.companyConfig) {
     loadCompanyAllowlist(window.__llmGuard.companyConfig.whitelist);
@@ -74,11 +93,11 @@
   // Browser (Chrome MAIN world)
   if (typeof window !== "undefined") {
     window.__llmGuard = window.__llmGuard || {};
-    window.__llmGuard.allowlist = { isAllowlisted, loadAllowlist, loadCompanyAllowlist, DEFAULT_ALLOWLIST };
+    window.__llmGuard.allowlist = { isAllowlisted, isAttachmentAllowlisted, loadAllowlist, loadCompanyAllowlist, DEFAULT_ALLOWLIST };
   }
 
   // Node.js (tests)
   if (typeof module !== "undefined" && module.exports) {
-    module.exports = { isAllowlisted, loadAllowlist, loadCompanyAllowlist, DEFAULT_ALLOWLIST };
+    module.exports = { isAllowlisted, isAttachmentAllowlisted, loadAllowlist, loadCompanyAllowlist, DEFAULT_ALLOWLIST };
   }
 })();

@@ -61,14 +61,34 @@
     });
   }
 
+  async function sha256Hex(data) {
+    const cryptoObj = (typeof globalThis !== "undefined" && globalThis.crypto) || null;
+    if (!cryptoObj?.subtle?.digest) return "";
+    const buf = data instanceof ArrayBuffer
+      ? data
+      : ArrayBuffer.isView(data)
+        ? data.buffer.slice(data.byteOffset, data.byteOffset + data.byteLength)
+        : new TextEncoder().encode(String(data)).buffer;
+    const digest = await cryptoObj.subtle.digest("SHA-256", buf);
+    return Array.from(new Uint8Array(digest), (b) => b.toString(16).padStart(2, "0")).join("");
+  }
+
+  function formatBytes(n) {
+    if (!Number.isFinite(n) || n < 0) return "";
+    if (n < 1024) return `${n} B`;
+    if (n < 1024 * 1024) return `${(n / 1024).toFixed(1)} KB`;
+    if (n < 1024 * 1024 * 1024) return `${(n / (1024 * 1024)).toFixed(1)} MB`;
+    return `${(n / (1024 * 1024 * 1024)).toFixed(2)} GB`;
+  }
+
   // Browser (Chrome MAIN world)
   if (typeof window !== "undefined") {
     window.__llmGuard = window.__llmGuard || {};
-    window.__llmGuard.utils = { levenshtein, normalize, maskPII, getMaxSeverity, deduplicateFindings };
+    window.__llmGuard.utils = { levenshtein, normalize, maskPII, getMaxSeverity, deduplicateFindings, sha256Hex, formatBytes };
   }
 
   // Node.js (tests)
   if (typeof module !== "undefined" && module.exports) {
-    module.exports = { levenshtein, normalize, maskPII, getMaxSeverity, deduplicateFindings };
+    module.exports = { levenshtein, normalize, maskPII, getMaxSeverity, deduplicateFindings, sha256Hex, formatBytes };
   }
 })();

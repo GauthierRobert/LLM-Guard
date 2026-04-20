@@ -12,11 +12,13 @@ window.addEventListener("message", (event) => {
   }
 
   if (event.data.type === "getMode") {
-    chrome.storage.local.get(["guard_mode", "guard_layer4"], (r) => {
+    chrome.storage.local.get(["guard_mode", "guard_layer4", "guard_attachment"], (r) => {
       const mode = r.guard_mode === "block" ? "block" : "anonymize";
       const layer4 = r.guard_layer4 || { enabled: false, presidioUrl: "" };
+      const attachment = r.guard_attachment || {};
       window.postMessage({ source: "llm-guard-bridge", type: "modeUpdate", mode }, window.location.origin);
       window.postMessage({ source: "llm-guard-bridge", type: "layer4Update", layer4 }, window.location.origin);
+      window.postMessage({ source: "llm-guard-bridge", type: "attachmentConfigUpdate", attachment }, window.location.origin);
     });
     return;
   }
@@ -26,6 +28,20 @@ window.addEventListener("message", (event) => {
     if (mode === "anonymize" || mode === "block") {
       chrome.storage.local.set({ guard_mode: mode });
     }
+    return;
+  }
+
+  if (event.data.type === "allowlist.addAttachment") {
+    const sha256 = event.data.sha256 || "";
+    if (!sha256) return;
+    const filename = event.data.filename || "";
+    chrome.storage.local.get(["guard_user_allowlist"], (r) => {
+      const list = Array.isArray(r.guard_user_allowlist) ? r.guard_user_allowlist : [];
+      if (!list.some((e) => e.type === "attachment" && e.pattern === sha256)) {
+        list.push({ type: "attachment", pattern: sha256, filename });
+        chrome.storage.local.set({ guard_user_allowlist: list });
+      }
+    });
     return;
   }
 });
@@ -39,5 +55,9 @@ chrome.storage.onChanged.addListener((changes) => {
   if (changes.guard_layer4) {
     const layer4 = changes.guard_layer4.newValue || { enabled: false, presidioUrl: "" };
     window.postMessage({ source: "llm-guard-bridge", type: "layer4Update", layer4 }, window.location.origin);
+  }
+  if (changes.guard_attachment) {
+    const attachment = changes.guard_attachment.newValue || {};
+    window.postMessage({ source: "llm-guard-bridge", type: "attachmentConfigUpdate", attachment }, window.location.origin);
   }
 });

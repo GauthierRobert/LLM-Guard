@@ -136,7 +136,12 @@ function buildPiiRow(type, count, maxCount) {
 
 /** Build a single log entry using safe DOM construction */
 function buildLogEntry(log) {
-  const rawDotClass = log.action === "BLOCKED" ? "block" : log.action === "ANONYMIZED" ? "anon" : log.action === "PII_DETECTED" ? "warn" : "clean";
+  const action = log.action || "";
+  const rawDotClass =
+    action === "BLOCKED" || action === "ATTACHMENT_BLOCKED" ? "block" :
+    action === "ANONYMIZED" ? "anon" :
+    action === "PII_DETECTED" || action === "ATTACHMENT_PII_DETECTED" || action === "ATTACHMENT_DETECTED" || action === "ATTACHMENT_UNSCANNED" ? "warn" :
+    "clean";
   const dotClass = VALID_DOT_CLASSES.includes(rawDotClass) ? rawDotClass : "clean";
 
   const time = new Date(log.timestamp).toLocaleTimeString("fr-FR", { hour: "2-digit", minute: "2-digit", second: "2-digit" });
@@ -197,6 +202,9 @@ function loadStats() {
     document.getElementById("s-anon").textContent = s.anonymizedPrompts;
     document.getElementById("s-flag").textContent = s.flaggedPrompts;
     document.getElementById("s-block").textContent = s.blockedPrompts;
+    document.getElementById("s-att-total").textContent = s.attachmentsScanned || 0;
+    document.getElementById("s-att-flag").textContent = s.attachmentsFlagged || 0;
+    document.getElementById("s-att-block").textContent = s.attachmentsBlocked || 0;
 
     // LLM bars
     const llmSection = document.getElementById("llm-section");
