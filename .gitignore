@@ -1,3 +1,5 @@
 *.iml
 /.idea/
 config/company-rules.js
+api-java/.gradle/
+api-java/build/
