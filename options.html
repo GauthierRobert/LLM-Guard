@@ -121,6 +121,26 @@
     </div>
 
     <div class="section">
+      <div class="section-title">Détection sémantique (Couche 4)</div>
+      <label class="toggle">
+        <input type="checkbox" id="opt-layer4-enabled">
+        <div class="toggle-text">
+          <strong>Activer la détection locale via Presidio</strong>
+          <span>Appelle un microservice Presidio auto-hébergé pour détecter les noms, organisations et lieux non couverts par les regex. Aucune donnée ne sort de votre réseau.</span>
+        </div>
+      </label>
+      <label>
+        <span class="lbl">URL du service Presidio</span>
+        <div class="row">
+          <input type="url" id="opt-layer4-presidio-url" placeholder="http://presidio.internal:5001" autocomplete="off">
+          <button class="btn secondary" id="btn-layer4-test" type="button">Tester</button>
+        </div>
+        <span class="hint">Le service doit répondre à <code>&lt;URL&gt;/health</code> et <code>&lt;URL&gt;/analyze</code>. Reste sur votre réseau.</span>
+      </label>
+      <div class="queue-row"><span>État Presidio</span><span id="layer4-status">—</span></div>
+    </div>
+
+    <div class="section">
       <div class="section-title">Identité de l'appareil</div>
       <label>
         <span class="lbl">Device ID (généré automatiquement)</span>

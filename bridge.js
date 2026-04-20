@@ -12,9 +12,11 @@ window.addEventListener("message", (event) => {
   }
 
   if (event.data.type === "getMode") {
-    chrome.storage.local.get(["guard_mode"], (r) => {
+    chrome.storage.local.get(["guard_mode", "guard_layer4"], (r) => {
       const mode = r.guard_mode === "block" ? "block" : "anonymize";
+      const layer4 = r.guard_layer4 || { enabled: false, presidioUrl: "" };
       window.postMessage({ source: "llm-guard-bridge", type: "modeUpdate", mode }, window.location.origin);
+      window.postMessage({ source: "llm-guard-bridge", type: "layer4Update", layer4 }, window.location.origin);
     });
     return;
   }
@@ -33,5 +35,9 @@ chrome.storage.onChanged.addListener((changes) => {
   if (changes.guard_mode) {
     const mode = changes.guard_mode.newValue === "block" ? "block" : "anonymize";
     window.postMessage({ source: "llm-guard-bridge", type: "modeUpdate", mode }, window.location.origin);
+  }
+  if (changes.guard_layer4) {
+    const layer4 = changes.guard_layer4.newValue || { enabled: false, presidioUrl: "" };
+    window.postMessage({ source: "llm-guard-bridge", type: "layer4Update", layer4 }, window.location.origin);
   }
 });
