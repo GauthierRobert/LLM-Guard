@@ -130,7 +130,7 @@ LLM-Guard/
 ├── advanced-engine.js               # Full 4-layer detection engine (Node.js module for tests)
 ├── background.js                    # Service worker (storage, stats, badge)
 ├── bridge.js                        # ISOLATED↔MAIN world message relay
-├── layer4-local.js                  # Alternative Layer 4 backends (transformers.js, Presidio, Ollama)
+├── layer4-local.js                  # Alternative Layer 4 backends (transformers.js, Presidio)
 ├── build.js                         # Generates config/company-rules.js from JSON
 ├── popup.html                       # Extension popup dashboard
 ├── popup.js                         # Popup dashboard logic
@@ -179,7 +179,7 @@ PII detection layers active in content.js:
 | 3 | Contextual rules — Medical + person, Financial + person, Evaluation + person, Indirect ID, Location + person | <10ms | Always on |
 | 4 | LLM classification — Claude API call for semantic PII | 1-2s | **Disabled** (requires API key) |
 
-Layer 4 only activates when `LLM_CLASSIFIER_CONFIG.enabled = true` and an API key is set in `advanced-engine.js`. Alternative Layer 4 backends (transformers.js, Presidio Docker, Ollama) are documented in `layer4-local.js` and `docs/LAYER4-COMPARISON.md`.
+Layer 4 only activates when `LLM_CLASSIFIER_CONFIG.enabled = true` and an API key is set in `advanced-engine.js`. Alternative Layer 4 backends (transformers.js, Presidio Docker) are documented in `layer4-local.js` and `docs/LAYER4-COMPARISON.md`.
 
 ### Multi-LLM Support
 

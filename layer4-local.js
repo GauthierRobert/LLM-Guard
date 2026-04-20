@@ -5,23 +5,18 @@
  * window.__llmGuard.layer4) AND as a Node.js module (module.exports at bottom)
  * so the same code is used in production and in unit tests.
  *
- * 3 options selon votre contexte, de la plus légère à la plus puissante :
- * 
+ * 2 options selon votre contexte, de la plus légère à la plus puissante :
+ *
  * Option A : transformers.js dans le navigateur (ONNX, ~50MB de modèle)
  *            → Tourne 100% côté client, aucun serveur nécessaire
  *            → Modèle NER pour détecter noms, orgs, lieux
  *            → Latence : ~200-500ms
- * 
+ *
  * Option B : Microservice spaCy / Presidio (Docker, auto-hébergé)
  *            → Tourne sur votre serveur interne
  *            → Plus précis, supporte le français nativement
  *            → Latence : ~50-100ms
- * 
- * Option C : LLM local via Ollama (Mistral 7B, Llama 3.2)
- *            → Le plus puissant, compréhension sémantique complète
- *            → Nécessite un GPU ou CPU puissant
- *            → Latence : ~1-3s
- * 
+ *
  * AUCUNE de ces options n'envoie de données à un service cloud.
  */
 
@@ -280,99 +275,6 @@ class PresidioClassifier {
 
 
 // ═══════════════════════════════════════════════════════════════
-// OPTION C — LLM local via Ollama
-// ═══════════════════════════════════════════════════════════════
-//
-// Ollama fait tourner Mistral/Llama localement.
-// Installation : curl -fsSL https://ollama.com/install.sh | sh
-// Lancement :    ollama run mistral
-//
-// API REST sur localhost:11434 — rien ne sort du réseau.
-
-class OllamaClassifier {
-  constructor(baseUrl = "http://localhost:11434") {
-    this.baseUrl = baseUrl;
-    this.model = "mistral"; // ou "llama3.2", "phi3", etc.
-    this.ready = false;
-  }
-
-  async init() {
-    try {
-      const response = await fetch(`${this.baseUrl}/api/tags`);
-      if (response.ok) {
-        const data = await response.json();
-        const hasModel = data.models?.some((m) =>
-          m.name.includes(this.model)
-        );
-        this.ready = hasModel;
-        if (this.ready) {
-          console.log(`[LLM Guard] Ollama connecté (${this.model})`);
-        } else {
-          console.warn(
-            `[LLM Guard] Modèle ${this.model} non trouvé dans Ollama`
-          );
-        }
-      }
-    } catch {
-      console.warn("[LLM Guard] Ollama non accessible sur", this.baseUrl);
-      this.ready = false;
-    }
-  }
-
-  async classify(text) {
-    if (!this.ready) {
-      await this.init();
-      if (!this.ready) return [];
-    }
-
-    try {
-      const response = await fetch(`${this.baseUrl}/api/generate`, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          model: this.model,
-          prompt: `Tu es un détecteur de données personnelles RGPD.
-Analyse ce texte et réponds UNIQUEMENT avec du JSON valide, sans backticks :
-{"pii": true/false, "items": [{"type": "catégorie", "value": "extrait", "severity": "critical/high/medium/low"}]}
-
-Texte : "${text}"`,
-          stream: false,
-          options: {
-            temperature: 0.1,
-            num_predict: 200,
-          },
-        }),
-      });
-
-      if (!response.ok) return [];
-
-      const data = await response.json();
-      const resultText = data.response || "";
-
-      try {
-        const result = JSON.parse(
-          resultText.replace(/```json?|```/g, "").trim()
-        );
-        if (!result.pii || !result.items) return [];
-
-        return result.items.map((item) => ({
-          layer: "ollama-local",
-          type: item.type,
-          severity: item.severity || "medium",
-          matches: [item.value].filter(Boolean),
-        }));
-      } catch {
-        return [];
-      }
-    } catch (err) {
-      console.warn("[LLM Guard] Erreur Ollama:", err.message);
-      return [];
-    }
-  }
-}
-
-
-// ═══════════════════════════════════════════════════════════════
 // SÉLECTEUR AUTOMATIQUE
 // Détecte quelle option est disponible et l'utilise
 // ═══════════════════════════════════════════════════════════════
@@ -380,9 +282,8 @@ Texte : "${text}"`,
 class Layer4Classifier {
   constructor(config = {}) {
     this.config = {
-      // Priorité : presidio > ollama > browser
+      // Priorité : presidio > browser
       presidioUrl: config.presidioUrl || null,
-      ollamaUrl: config.ollamaUrl || null,
       enableBrowserNLP: config.enableBrowserNLP !== false,
     };
 
@@ -399,16 +300,6 @@ class Layer4Classifier {
       if (presidio.ready) {
         this.activeClassifier = presidio;
         this.activeType = "presidio";
-        return;
-      }
-    }
-
-    if (this.config.ollamaUrl) {
-      const ollama = new OllamaClassifier(this.config.ollamaUrl);
-      await ollama.init();
-      if (ollama.ready) {
-        this.activeClassifier = ollama;
-        this.activeType = "ollama";
         return;
       }
     }
@@ -447,7 +338,6 @@ if (typeof module !== "undefined" && module.exports) {
   module.exports = {
     BrowserNLPClassifier,
     PresidioClassifier,
-    OllamaClassifier,
     Layer4Classifier,
   };
 }
@@ -457,7 +347,6 @@ if (typeof window !== "undefined") {
   window.__llmGuard.layer4 = {
     BrowserNLPClassifier,
     PresidioClassifier,
-    OllamaClassifier,
     Layer4Classifier,
   };
 }
