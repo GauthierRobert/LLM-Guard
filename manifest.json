@@ -3,7 +3,7 @@
   "name": "LLM Guard — RGPD & AI Act Compliance",
   "version": "2.0.0",
   "description": "Intercepte, anonymise et journalise les prompts envoyés aux LLM (ChatGPT, Claude, Gemini, Copilot) pour la conformité RGPD/AI Act.",
-  "permissions": ["storage", "activeTab"],
+  "permissions": ["storage", "activeTab", "alarms"],
   "host_permissions": [
     "https://chatgpt.com/*",
     "https://chat.openai.com/*",
@@ -11,9 +11,14 @@
     "https://gemini.google.com/*",
     "https://copilot.microsoft.com/*"
   ],
+  "optional_host_permissions": [
+    "http://*/*",
+    "https://*/*"
+  ],
   "background": {
     "service_worker": "background.js"
   },
+  "options_page": "options.html",
   "content_scripts": [
     {
       "matches": [

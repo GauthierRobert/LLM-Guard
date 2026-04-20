@@ -14,6 +14,7 @@ node tests/test-advanced-engine.js     # 37 Layer 1-4 detection pipeline tests
 node tests/test-llm-adapters.js        # 18 LLM adapter extract/inject tests
 node tests/test-allowlist.js           # 6 allowlist/exemption tests
 node tests/test-company-rules.js       # 25 company whitelist/blacklist tests
+node tests/test-telemetry.js           # 16 telemetry (scrub, batching, retry) tests
 ```
 
 No linting or formatting toolchain is configured.
@@ -59,6 +60,37 @@ Companies can package the extension with their own whitelist (never-flag pattern
 - Blacklist keyword entries are merged into `SENSITIVE_KEYWORDS_CATEGORIZED` for fuzzy/Levenshtein detection
 - Blacklist regex entries are scanned as a separate layer (Layer 1.6) in `scanForPII()`
 
+## Centralized Dashboard (self-hosted)
+
+The extension can ship metadata to a central dashboard run by a company's SOC. All components are self-hosted — no third-party cloud.
+
+### Architecture
+
+```
+Extension (telemetry.js) → POST /v1/events → FastAPI (api/) → Postgres+TimescaleDB
+                                                      ↑
+Angular 21 dashboard (dashboard/) ──── /v1/stats, /v1/events, WS /v1/live
+                           ↑
+                      Keycloak (OIDC)
+```
+
+- **Wire contract:** `shared/schema.json` (JSON Schema) — Pydantic in `api/`, TS types in `dashboard/src/app/core/schema.generated.ts`.
+- **Privacy:** `telemetry.js` strips `promptPreview` and per-finding `samples[]` before upload; URL is reduced to hostname. Only metadata + `anonymizedPreview` (already `[EMAIL_1]`-style) leaves the browser.
+- **Opt-in:** disabled by default. Enable in the Options page (`chrome-extension://.../options.html`).
+
+### Extension files
+
+| File | Role |
+|------|------|
+| `telemetry.js` | Service-worker module: batching, retry (exponential backoff), outbox in `chrome.storage.local.guard_outbox`, scrub filter |
+| `options.html` / `options.js` | Configure backend URL, device token, org ID; view queue status; force flush; test connection |
+| `shared/schema.json` | Wire contract (JSON Schema) |
+| `background.js` | Calls `telemetry.enqueue(event)` after `storeLog`; `chrome.alarms` periodic flush every minute |
+
+### Backend & dashboard
+
+See `api/README.md` and `dashboard/README.md` for dev and deployment. Single-node prod via `infra/docker-compose.yml` (Postgres + Timescale, Keycloak, FastAPI, Angular SSR, Caddy TLS).
+
 ## Installing the Extension
 
 1. Go to `chrome://extensions/`
@@ -72,6 +104,13 @@ Companies can package the extension with their own whitelist (never-flag pattern
 
 ```
 LLM-Guard/
+├── api/                             # Self-hosted FastAPI backend (Python 3.12)
+├── dashboard/                       # Angular 21 SOC dashboard (SSR, signals)
+├── infra/                           # docker-compose.yml, Caddyfile, Keycloak realm
+├── shared/
+│   └── schema.json                  # Wire contract between extension ↔ api ↔ dashboard
+├── telemetry.js                     # Extension telemetry module (service worker)
+├── options.html / options.js        # Extension options page (backend config)
 ├── config/                          # Company customization (JSON + generated JS)
 │   ├── whitelist.json               # Company whitelist (never-flag patterns)
 │   ├── blacklist.json               # Company blacklist (always-flag terms)

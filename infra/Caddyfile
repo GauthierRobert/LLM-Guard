@@ -1,0 +1,23 @@
+{
+  # Replace with your domain. For local dev use http:// with :80.
+  email ops@example.com
+}
+
+dashboard.example.com {
+  encode zstd gzip
+
+  # API + WebSockets live stream
+  reverse_proxy /api/* api:8000 {
+    transport http {
+      versions 1.1 2
+    }
+  }
+  @live path /api/v1/live
+  reverse_proxy @live api:8000
+
+  # Keycloak
+  reverse_proxy /auth/* keycloak:8080
+
+  # Dashboard SSR (everything else)
+  reverse_proxy /* dashboard:4000
+}

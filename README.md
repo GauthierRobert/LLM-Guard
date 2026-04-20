@@ -45,12 +45,28 @@ llm-guard-v2/
 ├── manifest.json      # Manifest V3, multi-domaines
 ├── content.js         # Injection MAIN — interception + anonymisation
 ├── bridge.js          # Relais ISOLATED → background
-├── background.js      # Service worker — stockage + badges
-├── popup.html         # Dashboard multi-LLM
-├── tests/
-│   └── test-scanner-v2.js   # 31 tests unitaires
+├── background.js      # Service worker — stockage + badges + telemetry
+├── telemetry.js       # Upload vers dashboard centralisé (opt-in)
+├── options.html/.js   # Configuration du backend
+├── popup.html         # Dashboard local multi-LLM
+├── shared/
+│   └── schema.json    # Contrat d'évènement (extension ↔ api ↔ dashboard)
+├── api/               # Backend FastAPI + Postgres/Timescale (self-hosted)
+├── dashboard/         # Dashboard Angular 21 (SSR, Material 3)
+├── infra/             # docker-compose, Caddy, Keycloak
+├── tests/             # 6 suites (~133 tests)
 └── icons/
 ```
+
+## Dashboard centralisé (auto-hébergé)
+
+Pour les équipes sécurité qui veulent une vue de flotte, le projet inclut un backend FastAPI et un dashboard Angular 21 auto-hébergés :
+
+1. `cd infra && docker compose up -d` (Postgres+Timescale, Keycloak, API, dashboard, Caddy TLS)
+2. Créer un jeton d'appareil côté dashboard, le coller dans `chrome-extension://.../options.html`
+3. Cocher *"Activer l'envoi des métadonnées"* — seules les métadonnées et les aperçus anonymisés (`[EMAIL_1]`, `[PHONE_2]`…) quittent le navigateur
+
+Voir `infra/README.md`, `api/README.md`, `dashboard/README.md`.
 
 ## Modes de protection
 
@@ -63,11 +79,15 @@ llm-guard-v2/
 ## Tests
 
 ```bash
-node tests/test-scanner-v2.js
-# ✓ 31/31 tests réussis
+node tests/test-scanner-v2.js       # 31 tests détection/anonymisation
+node tests/test-advanced-engine.js  # 37 tests pipeline 4 couches
+node tests/test-llm-adapters.js     # 18 tests adaptateurs LLM
+node tests/test-allowlist.js        # 6 tests allowlist
+node tests/test-company-rules.js    # 25 tests whitelist/blacklist entreprise
+node tests/test-telemetry.js        # 16 tests télémétrie (scrub, batching, retry)
 ```
 
 ## Limites et prochaines étapes
 
 - **Limites** : détection par regex (pas de NLP), pas de scan des fichiers uploadés, dé-anonymisation des réponses non implémentée côté navigateur (le mapping est prêt)
-- **Prochaines étapes possibles** : backend centralisé pour collecter les logs de tous les employés, intégration Microsoft Presidio pour NLP, scan des images/PDF via OCR, webhook vers un SIEM, dé-anonymisation en temps réel dans les réponses SSE
+- **Prochaines étapes possibles** : intégration Microsoft Presidio pour NLP, scan des images/PDF via OCR, webhook vers un SIEM, dé-anonymisation en temps réel dans les réponses SSE, alerting Slack/Teams depuis le dashboard

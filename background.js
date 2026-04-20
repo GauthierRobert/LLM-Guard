@@ -2,12 +2,28 @@
  * LLM Guard v2 — Background Service Worker
  */
 
+importScripts("telemetry.js");
+
+// Periodic flush via chrome.alarms (service workers can be evicted; alarms wake them).
+chrome.runtime.onInstalled.addListener(() => {
+  chrome.alarms.create("telemetry-flush", { periodInMinutes: 1 });
+});
+chrome.runtime.onStartup?.addListener(() => {
+  chrome.alarms.create("telemetry-flush", { periodInMinutes: 1 });
+});
+chrome.alarms.onAlarm.addListener((alarm) => {
+  if (alarm.name === "telemetry-flush") {
+    self.telemetry?.flush?.().catch((err) => console.warn("[LLM Guard] alarm flush", err));
+  }
+});
+
 chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
   if (message.source !== "llm-guard") return;
 
   if (message.type === "log") {
     storeLog(message.payload);
     updateBadge(message.payload);
+    self.telemetry?.enqueue?.(message.payload);
   }
 
   if (message.type === "getLogs") {
@@ -30,7 +46,55 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
     });
     return true;
   }
+
+  if (message.type === "telemetry.getConfig") {
+    self.telemetry.getConfig().then(sendResponse);
+    return true;
+  }
+
+  if (message.type === "telemetry.setConfig") {
+    self.telemetry.setConfig(message.patch || {}).then(sendResponse);
+    return true;
+  }
+
+  if (message.type === "telemetry.getState") {
+    self.telemetry.getState().then(sendResponse);
+    return true;
+  }
+
+  if (message.type === "telemetry.flush") {
+    self.telemetry.flush().then(
+      () => self.telemetry.getState().then((state) => sendResponse({ ok: true, state })),
+      (err) => sendResponse({ error: err?.message || String(err) })
+    );
+    return true;
+  }
+
+  if (message.type === "telemetry.test") {
+    runConnectivityTest().then(sendResponse);
+    return true;
+  }
+
+  if (message.type === "telemetry.regenerateDeviceId") {
+    self.telemetry.setConfig({ deviceId: crypto.randomUUID() }).then(sendResponse);
+    return true;
+  }
 });
+
+async function runConnectivityTest() {
+  const cfg = await self.telemetry.getConfig();
+  if (!cfg.backendUrl) return { ok: false, error: "Backend URL missing" };
+  const url = cfg.backendUrl.replace(/\/+$/, "") + "/v1/health";
+  try {
+    const res = await fetch(url, {
+      method: "GET",
+      headers: cfg.deviceToken ? { Authorization: `Bearer ${cfg.deviceToken}` } : {},
+    });
+    return { ok: res.ok, status: res.status };
+  } catch (err) {
+    return { ok: false, error: err?.message || String(err) };
+  }
+}
 
 function defaultStats() {
   return {

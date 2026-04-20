@@ -1,0 +1,39 @@
+{
+  "realm": "llm-guard",
+  "enabled": true,
+  "sslRequired": "external",
+  "registrationAllowed": false,
+  "loginWithEmailAllowed": true,
+  "clients": [
+    {
+      "clientId": "llm-guard-dashboard",
+      "enabled": true,
+      "publicClient": true,
+      "standardFlowEnabled": true,
+      "directAccessGrantsEnabled": true,
+      "redirectUris": ["http://localhost:4200/*", "https://dashboard.example.com/*"],
+      "webOrigins": ["+"],
+      "attributes": {
+        "access.token.lifespan": "900",
+        "pkce.code.challenge.method": "S256"
+      }
+    }
+  ],
+  "roles": {
+    "realm": [
+      { "name": "soc-admin", "description": "Full dashboard + device management" },
+      { "name": "soc-viewer", "description": "Read-only analyst" }
+    ]
+  },
+  "defaultRoles": ["soc-viewer"],
+  "users": [
+    {
+      "username": "admin@example.com",
+      "enabled": true,
+      "emailVerified": true,
+      "email": "admin@example.com",
+      "credentials": [{ "type": "password", "value": "changeme", "temporary": false }],
+      "realmRoles": ["soc-admin"]
+    }
+  ]
+}

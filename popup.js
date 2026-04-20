@@ -5,13 +5,62 @@ const VALID_DOT_CLASSES = ["block", "anon", "warn", "clean"];
 const VALID_SEVERITY_CLASSES = ["critical", "high", "medium", "low"];
 
 document.addEventListener("DOMContentLoaded", () => {
-  loadStats(); loadLogs(); loadMode();
+  loadStats(); loadLogs(); loadMode(); loadSyncStatus();
   document.getElementById("btn-clear").addEventListener("click", clearLogs);
   document.getElementById("btn-export").addEventListener("click", exportLogs);
+  document.getElementById("btn-configure").addEventListener("click", openOptions);
+  document.getElementById("btn-dashboard").addEventListener("click", openDashboard);
   document.querySelectorAll(".mode-btn").forEach(b =>
     b.addEventListener("click", () => setMode(b.dataset.mode))
   );
 });
+
+function openOptions() {
+  if (chrome.runtime.openOptionsPage) chrome.runtime.openOptionsPage();
+  else window.open(chrome.runtime.getURL("options.html"));
+}
+
+function openDashboard() {
+  chrome.runtime.sendMessage({ source: "llm-guard", type: "telemetry.getConfig" }, (cfg) => {
+    const url = cfg?.backendUrl ? cfg.backendUrl.replace(/\/+$/, "") : "";
+    if (!url) {
+      openOptions();
+      return;
+    }
+    chrome.tabs.create({ url });
+  });
+}
+
+function loadSyncStatus() {
+  chrome.runtime.sendMessage({ source: "llm-guard", type: "telemetry.getConfig" }, (cfg) => {
+    chrome.runtime.sendMessage({ source: "llm-guard", type: "telemetry.getState" }, (state) => {
+      const dot = document.getElementById("sync-dot");
+      const text = document.getElementById("sync-text");
+      const meta = document.getElementById("sync-meta");
+      if (!cfg || !cfg.enabled || !cfg.backendUrl) {
+        dot.className = "sync-dot off";
+        text.textContent = "Envoi désactivé";
+        meta.textContent = "";
+        return;
+      }
+      const queued = state?.queued || 0;
+      if (state?.lastError) {
+        dot.className = "sync-dot err";
+        text.textContent = "Erreur d'envoi";
+      } else if (queued > 0) {
+        dot.className = "sync-dot pending";
+        text.textContent = "Envoi en attente";
+      } else {
+        dot.className = "sync-dot ok";
+        text.textContent = "Synchronisé";
+      }
+      const last = state?.lastSentAt
+        ? new Date(state.lastSentAt).toLocaleTimeString("fr-FR", { hour: "2-digit", minute: "2-digit" })
+        : "—";
+      meta.textContent = `${queued} en file • ${last}`;
+    });
+  });
+}
 
 /** Build an LLM usage bar row using safe DOM construction */
 function buildLlmRow(name, data, maxTotal) {

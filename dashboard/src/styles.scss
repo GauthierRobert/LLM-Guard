@@ -1,0 +1,29 @@
+@use '@angular/material' as mat;
+
+html { color-scheme: dark; }
+
+$lg-palette: mat.m3-define-palette(mat.$m3-green-palette, 70, 30, 90, 10);
+
+:root {
+  @include mat.all-component-themes((
+    color: (
+      primary: $lg-palette,
+      theme-type: dark,
+    ),
+    typography: (
+      plain-family: 'Inter, system-ui, sans-serif',
+      brand-family: 'Inter, system-ui, sans-serif',
+    ),
+    density: 0,
+  ));
+}
+
+* { box-sizing: border-box; }
+html, body { height: 100%; margin: 0; }
+body {
+  font-family: Inter, system-ui, sans-serif;
+  background: #0e0f11;
+  color: #d1d0c7;
+}
+
+a { color: #5DCAA5; }
