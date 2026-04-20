@@ -2,14 +2,20 @@
   "manifest_version": 3,
   "name": "LLM Guard — RGPD & AI Act Compliance",
   "version": "2.0.0",
-  "description": "Intercepte, anonymise et journalise les prompts envoyés aux LLM (ChatGPT, Claude, Gemini, Copilot) pour la conformité RGPD/AI Act.",
+  "description": "Intercepte, anonymise et journalise les prompts envoyés aux LLM (ChatGPT, Claude, Gemini, Copilot, Mistral, Perplexity, DeepSeek, Grok) pour la conformité RGPD/AI Act.",
   "permissions": ["storage", "activeTab", "alarms"],
   "host_permissions": [
     "https://chatgpt.com/*",
     "https://chat.openai.com/*",
     "https://claude.ai/*",
     "https://gemini.google.com/*",
-    "https://copilot.microsoft.com/*"
+    "https://copilot.microsoft.com/*",
+    "https://chat.mistral.ai/*",
+    "https://www.perplexity.ai/*",
+    "https://perplexity.ai/*",
+    "https://chat.deepseek.com/*",
+    "https://grok.com/*",
+    "https://x.ai/*"
   ],
   "optional_host_permissions": [
     "http://*/*",
@@ -26,7 +32,13 @@
         "https://chat.openai.com/*",
         "https://claude.ai/*",
         "https://gemini.google.com/*",
-        "https://copilot.microsoft.com/*"
+        "https://copilot.microsoft.com/*",
+        "https://chat.mistral.ai/*",
+        "https://www.perplexity.ai/*",
+        "https://perplexity.ai/*",
+        "https://chat.deepseek.com/*",
+        "https://grok.com/*",
+        "https://x.ai/*"
       ],
       "js": ["rules/pii-patterns.js", "rules/sensitive-keywords.js", "rules/sensitive-keywords-categorized.js", "rules/context-rules.js", "config/company-rules.js", "rules/allowlist.js", "utils.js", "ui.js", "llm-adapters.js", "layer4-local.js", "anonymizer.js", "extractors/text-extractor.js", "extractors/pdf-extractor.js", "extractors/ocr-extractor.js", "attachment-scanner.js", "content.js"],
       "run_at": "document_start",
@@ -38,7 +50,13 @@
         "https://chat.openai.com/*",
         "https://claude.ai/*",
         "https://gemini.google.com/*",
-        "https://copilot.microsoft.com/*"
+        "https://copilot.microsoft.com/*",
+        "https://chat.mistral.ai/*",
+        "https://www.perplexity.ai/*",
+        "https://perplexity.ai/*",
+        "https://chat.deepseek.com/*",
+        "https://grok.com/*",
+        "https://x.ai/*"
       ],
       "js": ["bridge.js"],
       "run_at": "document_start"
@@ -52,7 +70,13 @@
         "https://chat.openai.com/*",
         "https://claude.ai/*",
         "https://gemini.google.com/*",
-        "https://copilot.microsoft.com/*"
+        "https://copilot.microsoft.com/*",
+        "https://chat.mistral.ai/*",
+        "https://www.perplexity.ai/*",
+        "https://perplexity.ai/*",
+        "https://chat.deepseek.com/*",
+        "https://grok.com/*",
+        "https://x.ai/*"
       ]
     }
   ],

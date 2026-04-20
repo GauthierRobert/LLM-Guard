@@ -13,7 +13,7 @@ window.addEventListener("message", (event) => {
 
   if (event.data.type === "getMode") {
     chrome.storage.local.get(["guard_mode", "guard_layer4", "guard_attachment"], (r) => {
-      const mode = r.guard_mode === "block" ? "block" : "anonymize";
+      const mode = ["block", "visible", "anonymize"].includes(r.guard_mode) ? r.guard_mode : "anonymize";
       const layer4 = r.guard_layer4 || { enabled: false, presidioUrl: "" };
       const attachment = r.guard_attachment || {};
       window.postMessage({ source: "llm-guard-bridge", type: "modeUpdate", mode }, window.location.origin);
@@ -25,7 +25,7 @@ window.addEventListener("message", (event) => {
 
   if (event.data.type === "setMode") {
     const mode = event.data.mode;
-    if (mode === "anonymize" || mode === "block") {
+    if (mode === "anonymize" || mode === "block" || mode === "visible") {
       chrome.storage.local.set({ guard_mode: mode });
     }
     return;
@@ -49,7 +49,8 @@ window.addEventListener("message", (event) => {
 // Relay storage changes (e.g. popup mode switch) back to the page
 chrome.storage.onChanged.addListener((changes) => {
   if (changes.guard_mode) {
-    const mode = changes.guard_mode.newValue === "block" ? "block" : "anonymize";
+    const raw = changes.guard_mode.newValue;
+    const mode = ["block", "visible", "anonymize"].includes(raw) ? raw : "anonymize";
     window.postMessage({ source: "llm-guard-bridge", type: "modeUpdate", mode }, window.location.origin);
   }
   if (changes.guard_layer4) {

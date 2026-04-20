@@ -157,6 +157,107 @@ test("Inject into Copilot messages", () => {
 });
 
 // ═══════════════════════════════════════════════════════════════
+// Mistral Le Chat
+// ═══════════════════════════════════════════════════════════════
+
+console.log("\n\x1b[1m\x1b[36m━━━ Mistral Adapter ━━━\x1b[0m\n");
+
+test("Extract from Mistral messages with string content", () => {
+  const body = JSON.stringify({
+    messages: [
+      { role: "system", content: "sys" },
+      { role: "user", content: "Bonjour Mistral" },
+    ],
+  });
+  const text = extractPrompt(body, LLM_ADAPTERS.mistral);
+  assert(text === "Bonjour Mistral", `Got: ${text}`);
+});
+
+test("Inject into Mistral messages with string content", () => {
+  const body = JSON.stringify({ messages: [{ role: "user", content: "jean@ex.com" }] });
+  const result = injectAnonymized(body, "[EMAIL_1]", LLM_ADAPTERS.mistral);
+  const parsed = JSON.parse(result);
+  assert(parsed.messages[0].content === "[EMAIL_1]", `Got: ${parsed.messages[0].content}`);
+});
+
+test("Extract from Mistral messages with array content blocks", () => {
+  const body = JSON.stringify({
+    messages: [{ role: "user", content: [{ type: "text", text: "Block text" }] }],
+  });
+  const text = extractPrompt(body, LLM_ADAPTERS.mistral);
+  assert(text === "Block text", `Got: ${text}`);
+});
+
+// ═══════════════════════════════════════════════════════════════
+// Perplexity
+// ═══════════════════════════════════════════════════════════════
+
+console.log("\n\x1b[1m\x1b[36m━━━ Perplexity Adapter ━━━\x1b[0m\n");
+
+test("Extract from Perplexity query field", () => {
+  const body = JSON.stringify({ query: "What is RGPD?" });
+  const text = extractPrompt(body, LLM_ADAPTERS.perplexity);
+  assert(text === "What is RGPD?", `Got: ${text}`);
+});
+
+test("Extract from Perplexity messages array", () => {
+  const body = JSON.stringify({ messages: [{ role: "user", content: "Perplexity prompt" }] });
+  const text = extractPrompt(body, LLM_ADAPTERS.perplexity);
+  assert(text === "Perplexity prompt", `Got: ${text}`);
+});
+
+test("Inject into Perplexity query field", () => {
+  const body = JSON.stringify({ query: "original" });
+  const result = injectAnonymized(body, "[ANON]", LLM_ADAPTERS.perplexity);
+  const parsed = JSON.parse(result);
+  assert(parsed.query === "[ANON]", `Got: ${parsed.query}`);
+});
+
+// ═══════════════════════════════════════════════════════════════
+// DeepSeek
+// ═══════════════════════════════════════════════════════════════
+
+console.log("\n\x1b[1m\x1b[36m━━━ DeepSeek Adapter ━━━\x1b[0m\n");
+
+test("Extract from DeepSeek messages", () => {
+  const body = JSON.stringify({ messages: [{ role: "user", content: "DeepSeek prompt" }] });
+  const text = extractPrompt(body, LLM_ADAPTERS.deepseek);
+  assert(text === "DeepSeek prompt", `Got: ${text}`);
+});
+
+test("Inject into DeepSeek messages", () => {
+  const body = JSON.stringify({ messages: [{ role: "user", content: "jean@ex.com" }] });
+  const result = injectAnonymized(body, "[EMAIL_1]", LLM_ADAPTERS.deepseek);
+  const parsed = JSON.parse(result);
+  assert(parsed.messages[0].content === "[EMAIL_1]", `Got: ${parsed.messages[0].content}`);
+});
+
+// ═══════════════════════════════════════════════════════════════
+// Grok
+// ═══════════════════════════════════════════════════════════════
+
+console.log("\n\x1b[1m\x1b[36m━━━ Grok Adapter ━━━\x1b[0m\n");
+
+test("Extract from Grok top-level message field", () => {
+  const body = JSON.stringify({ message: "Hey Grok" });
+  const text = extractPrompt(body, LLM_ADAPTERS.grok);
+  assert(text === "Hey Grok", `Got: ${text}`);
+});
+
+test("Extract from Grok messages array", () => {
+  const body = JSON.stringify({ messages: [{ role: "user", message: "Grok via array" }] });
+  const text = extractPrompt(body, LLM_ADAPTERS.grok);
+  assert(text === "Grok via array", `Got: ${text}`);
+});
+
+test("Inject into Grok top-level message field", () => {
+  const body = JSON.stringify({ message: "original" });
+  const result = injectAnonymized(body, "[ANON]", LLM_ADAPTERS.grok);
+  const parsed = JSON.parse(result);
+  assert(parsed.message === "[ANON]", `Got: ${parsed.message}`);
+});
+
+// ═══════════════════════════════════════════════════════════════
 // Edge cases
 // ═══════════════════════════════════════════════════════════════
 

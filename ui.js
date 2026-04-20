@@ -198,11 +198,18 @@
     badge.addEventListener("mouseleave", () => {
       badge.style.transform = "scale(1)";
     });
+    const MODE_CYCLE = ["anonymize", "visible", "block"];
+    const MODE_COLORS = {
+      anonymize: activeLLM.color,
+      visible: "#7C3AED",
+      block: "#A32D2D",
+    };
     badge.addEventListener("click", () => {
-      const newMode = config.mode === "block" ? "anonymize" : "block";
+      const idx = MODE_CYCLE.indexOf(config.mode);
+      const newMode = MODE_CYCLE[(idx + 1) % MODE_CYCLE.length];
       config.mode = newMode;
       badge.title = `LLM Guard \u2014 ${activeLLM.name} | mode: ${newMode} (cliquez pour changer)`;
-      badge.style.background = newMode === "block" ? "#A32D2D" : activeLLM.color;
+      badge.style.background = MODE_COLORS[newMode] || activeLLM.color;
       if (onModeChange) onModeChange(newMode);
     });
 
@@ -234,9 +241,131 @@
     );
   }
 
+  // ── Visible mode: floating Reveal/Hide toggle ────────────────
+  // Only rewrites text inside the conversation container for the active LLM;
+  // never touches extension chrome or the whole document. Toggles the DOM in
+  // place between placeholders (the default in visible mode) and real values.
+  let revealState = false;
+  let revealButtonRef = null;
+
+  function addRevealToggleButton({ activeLLM, isVisibleMode, anonymizer }) {
+    const btn = document.createElement("button");
+    btn.id = "llm-guard-reveal";
+    btn.type = "button";
+    btn.textContent = "\u{1F441} R\u00e9v\u00e9ler les PII";
+    btn.setAttribute("aria-pressed", "false");
+    btn.setAttribute("style", [
+      "position: fixed",
+      "bottom: 16px",
+      "right: 60px",
+      "z-index: 999998",
+      "padding: 6px 12px",
+      "border-radius: 18px",
+      "border: 1px solid #7C3AED",
+      "background: #1a1430",
+      "color: #e4d7ff",
+      "font-family: system-ui, -apple-system, sans-serif",
+      "font-size: 12px",
+      "font-weight: 600",
+      "cursor: pointer",
+      "box-shadow: 0 2px 8px rgba(0,0,0,0.3)",
+      "display: none",
+    ].join(";"));
+    revealButtonRef = btn;
+
+    function getConversationRoots() {
+      const sel = activeLLM.conversationSelector || "main";
+      const nodes = document.querySelectorAll(sel);
+      return nodes.length > 0 ? Array.from(nodes) : [document.body];
+    }
+
+    function rewriteText(root, forward) {
+      // forward: placeholder -> original. Reverse: original -> placeholder.
+      const forwardMap = anonymizer.anonymizationMap;
+      const reverseMap = anonymizer.reverseMap;
+      if (forwardMap.size === 0) return;
+
+      const walker = document.createTreeWalker(root, NodeFilter.SHOW_TEXT, {
+        acceptNode(node) {
+          // Skip text inside the extension UI to avoid rewriting our own chrome.
+          let p = node.parentElement;
+          while (p) {
+            if (p.id === "llm-guard-banner" || p.id === "llm-guard-badge" || p.id === "llm-guard-reveal") {
+              return NodeFilter.FILTER_REJECT;
+            }
+            p = p.parentElement;
+          }
+          return NodeFilter.FILTER_ACCEPT;
+        },
+      });
+      const nodes = [];
+      let n;
+      while ((n = walker.nextNode())) nodes.push(n);
+
+      if (forward) {
+        // placeholder -> original. Longest first to avoid nested substrings.
+        const entries = Array.from(forwardMap.entries()).sort((a, b) => b[0].length - a[0].length);
+        for (const node of nodes) {
+          let t = node.nodeValue;
+          let changed = false;
+          for (const [placeholder, original] of entries) {
+            if (t.indexOf(placeholder) === -1) continue;
+            t = t.split(placeholder).join(original);
+            changed = true;
+          }
+          if (changed) node.nodeValue = t;
+        }
+      } else {
+        // original -> placeholder. Longest originals first.
+        const entries = Array.from(reverseMap.entries()).sort((a, b) => b[0].length - a[0].length);
+        for (const node of nodes) {
+          let t = node.nodeValue;
+          let changed = false;
+          for (const [original, placeholder] of entries) {
+            if (t.indexOf(original) === -1) continue;
+            t = t.split(original).join(placeholder);
+            changed = true;
+          }
+          if (changed) node.nodeValue = t;
+        }
+      }
+    }
+
+    btn.addEventListener("click", () => {
+      if (!isVisibleMode()) return;
+      const roots = getConversationRoots();
+      revealState = !revealState;
+      for (const r of roots) rewriteText(r, revealState);
+      btn.textContent = revealState ? "\u{1F441}\u200d\u{1F5E8} Masquer les PII" : "\u{1F441} R\u00e9v\u00e9ler les PII";
+      btn.setAttribute("aria-pressed", revealState ? "true" : "false");
+      btn.style.background = revealState ? "#3b1a6e" : "#1a1430";
+    });
+
+    function mount() {
+      if (document.body && !document.getElementById("llm-guard-reveal")) {
+        document.body.appendChild(btn);
+      }
+      updateRevealButton(isVisibleMode());
+    }
+    if (document.body) mount();
+    else document.addEventListener("DOMContentLoaded", mount);
+  }
+
+  function updateRevealButton(show) {
+    if (!revealButtonRef) return;
+    revealButtonRef.style.display = show ? "inline-block" : "none";
+    if (!show) {
+      // Reset state when leaving visible mode so next entry starts hidden.
+      revealState = false;
+      revealButtonRef.textContent = "\u{1F441} R\u00e9v\u00e9ler les PII";
+      revealButtonRef.setAttribute("aria-pressed", "false");
+      revealButtonRef.style.background = "#1a1430";
+    }
+  }
+
   // Browser only -- all functions require DOM APIs
   if (typeof window !== "undefined") {
     window.__llmGuard = window.__llmGuard || {};
-    window.__llmGuard.ui = { showBanner, addStatusBadge, logEvent };
+    window.__llmGuard.ui = { showBanner, addStatusBadge, logEvent, addRevealToggleButton, updateRevealButton };
   }
 })();

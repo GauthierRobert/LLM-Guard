@@ -57,7 +57,7 @@
     },
     "llm": {
       "type": "string",
-      "enum": ["ChatGPT", "Claude", "Gemini", "Copilot", "Unknown"],
+      "enum": ["ChatGPT", "Claude", "Gemini", "Copilot", "Mistral", "Perplexity", "DeepSeek", "Grok", "Unknown"],
       "description": "LLM service identifier from LLM_PROFILES."
     },
     "action": {
@@ -82,7 +82,7 @@
     },
     "mode": {
       "type": "string",
-      "enum": ["anonymize", "block"],
+      "enum": ["anonymize", "block", "visible"],
       "description": "Active CONFIG.mode at the time of the event."
     },
     "promptLength": {

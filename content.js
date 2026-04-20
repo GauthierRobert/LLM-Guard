@@ -50,7 +50,55 @@
       adapter: LLM_ADAPTERS.copilot,
       color: "#0078D4",
     },
+    mistral: {
+      name: "Mistral",
+      hostMatch: /chat\.mistral\.ai/,
+      endpointMatch: /\/api\/(chat|conversation|completion)/i,
+      adapter: LLM_ADAPTERS.mistral,
+      color: "#FA5018",
+      composerSelector: 'textarea[placeholder], div[contenteditable="true"]',
+      conversationSelector: "main",
+    },
+    perplexity: {
+      name: "Perplexity",
+      hostMatch: /(^|\.)perplexity\.ai$/,
+      endpointMatch: /\/rest\/sse\/perplexity_ask|\/api\/(save_ask|new_ask|search)/i,
+      adapter: LLM_ADAPTERS.perplexity,
+      color: "#20B8CD",
+      composerSelector: 'textarea[placeholder*="Ask"], textarea',
+      conversationSelector: "main",
+    },
+    deepseek: {
+      name: "DeepSeek",
+      hostMatch: /chat\.deepseek\.com/,
+      endpointMatch: /\/api\/v\d+\/chat\/completion/i,
+      adapter: LLM_ADAPTERS.deepseek,
+      color: "#4D6BFE",
+      composerSelector: 'textarea#chat-input, textarea',
+      conversationSelector: "main",
+    },
+    grok: {
+      name: "Grok",
+      hostMatch: /(^|\.)grok\.com$|(^|\.)x\.ai$/,
+      endpointMatch: /\/rest\/app-chat\/conversations|\/api\/(rpc|chat|conversation)/i,
+      adapter: LLM_ADAPTERS.grok,
+      color: "#1DA1F2",
+      composerSelector: 'textarea[placeholder], div[contenteditable="true"]',
+      conversationSelector: "main",
+    },
   };
+
+  // Composer + conversation selectors for the 4 original LLMs. Used by the
+  // "visible" mode — must match the DOM node where the user types and where
+  // assistant messages are rendered.
+  LLM_PROFILES.chatgpt.composerSelector = '#prompt-textarea, textarea[data-id]';
+  LLM_PROFILES.chatgpt.conversationSelector = 'main';
+  LLM_PROFILES.claude.composerSelector = 'div[contenteditable="true"].ProseMirror, textarea';
+  LLM_PROFILES.claude.conversationSelector = 'main';
+  LLM_PROFILES.gemini.composerSelector = 'rich-textarea .ql-editor, div[contenteditable="true"]';
+  LLM_PROFILES.gemini.conversationSelector = '#chat-history, main';
+  LLM_PROFILES.copilot.composerSelector = '#userInput, textarea';
+  LLM_PROFILES.copilot.conversationSelector = 'main';
 
   const currentHost = window.location.hostname;
   const ACTIVE_LLM = Object.values(LLM_PROFILES).find((p) =>
@@ -94,11 +142,18 @@
 
     if (evt.data.type === "modeUpdate") {
       const m = evt.data.mode;
-      if (m === "anonymize" || m === "block") CONFIG.mode = m;
+      if (m === "anonymize" || m === "block" || m === "visible") CONFIG.mode = m;
       const badge = document.getElementById("llm-guard-badge");
       if (badge) {
         badge.title = `LLM Guard — ${ACTIVE_LLM.name} | mode: ${CONFIG.mode} (cliquez pour changer)`;
-        badge.style.background = CONFIG.mode === "block" ? "#A32D2D" : ACTIVE_LLM.color;
+        const bg = CONFIG.mode === "block" ? "#A32D2D"
+          : CONFIG.mode === "visible" ? "#7C3AED"
+          : ACTIVE_LLM.color;
+        badge.style.background = bg;
+      }
+      // Ensure the reveal toggle button reflects the current mode.
+      if (window.__llmGuard.ui.updateRevealButton) {
+        window.__llmGuard.ui.updateRevealButton(CONFIG.mode === "visible");
       }
     }
 
@@ -603,8 +658,11 @@
       );
     }
 
-    // ── Mode ANONYMIZE ──
-    if (CONFIG.mode === "anonymize") {
+    // ── Mode ANONYMIZE / VISIBLE ──
+    // Both modes anonymize the outgoing body identically; they differ only in
+    // how the response is rendered (see wrapResponseForDeanonymization and
+    // the "visible" gate below).
+    if (CONFIG.mode === "anonymize" || CONFIG.mode === "visible") {
       const { anonymized, mappings, changed } = anonymizeText(promptText);
 
       if (changed) {
@@ -615,6 +673,7 @@
         logEvent({
           action: "ANONYMIZED",
           endpoint: url,
+          mode: CONFIG.mode,
           promptLength: promptText.length,
           findings,
           mappingsCount: mappings.size,
@@ -697,6 +756,9 @@
   // (e.g. "[EMA" | "IL_1]") is still restored. The buffering rule lives
   // in anonymizer.js (makeStreamDeanonymizer).
   function wrapResponseForDeanonymization(response) {
+    // In "visible" mode the user opted into seeing placeholders in the
+    // rendered response — the reveal button does the restore on demand.
+    if (CONFIG.mode === "visible") return response;
     if (anonymizer.anonymizationMap.size === 0) return response;
 
     const originalBody = response.body;
@@ -733,6 +795,64 @@
   addStatusBadge(ACTIVE_LLM, CONFIG, (newMode) => {
     window.postMessage({ source: "llm-guard", type: "setMode", mode: newMode }, window.location.origin);
   });
+
+  // ─── Visible mode: composer pre-send anonymization ──────────
+  // Replace PII in the composer DOM node with placeholders right before the
+  // user submits, so they see [EMAIL_1] etc. The fetch intercept is idempotent
+  // on placeholders, so no double-encoding.
+  function rewriteComposerWithPlaceholders() {
+    if (CONFIG.mode !== "visible") return;
+    const selector = ACTIVE_LLM.composerSelector;
+    if (!selector) return;
+    const nodes = document.querySelectorAll(selector);
+    for (const el of nodes) {
+      const isTextarea = el.tagName === "TEXTAREA" || el.tagName === "INPUT";
+      const value = isTextarea ? el.value : el.innerText;
+      if (!value || !value.trim()) continue;
+      const { anonymized, changed } = anonymizeText(value);
+      if (!changed) continue;
+      if (isTextarea) {
+        // React-controlled inputs: use the native setter so the change event
+        // propagates through React's synthetic handler.
+        const setter = Object.getOwnPropertyDescriptor(
+          el.tagName === "TEXTAREA" ? window.HTMLTextAreaElement.prototype : window.HTMLInputElement.prototype,
+          "value"
+        )?.set;
+        if (setter) setter.call(el, anonymized);
+        else el.value = anonymized;
+        el.dispatchEvent(new Event("input", { bubbles: true }));
+      } else {
+        el.innerText = anonymized;
+        el.dispatchEvent(new Event("input", { bubbles: true }));
+      }
+    }
+  }
+
+  // Hook submit paths: Enter key on the composer, and Send button click.
+  document.addEventListener("keydown", (e) => {
+    if (CONFIG.mode !== "visible") return;
+    if (e.key !== "Enter" || e.shiftKey || e.isComposing) return;
+    const target = e.target;
+    if (!target || !target.matches) return;
+    if (target.matches(ACTIVE_LLM.composerSelector || "textarea")) {
+      rewriteComposerWithPlaceholders();
+    }
+  }, true);
+
+  document.addEventListener("click", (e) => {
+    if (CONFIG.mode !== "visible") return;
+    const btn = e.target && e.target.closest && e.target.closest('button[type="submit"], button[aria-label*="Send" i], button[data-testid*="send" i], button[aria-label*="Envoyer" i]');
+    if (btn) rewriteComposerWithPlaceholders();
+  }, true);
+
+  // ─── Visible mode: floating Reveal/Hide button ──────────────
+  if (window.__llmGuard.ui.addRevealToggleButton) {
+    window.__llmGuard.ui.addRevealToggleButton({
+      activeLLM: ACTIVE_LLM,
+      isVisibleMode: () => CONFIG.mode === "visible",
+      anonymizer,
+    });
+  }
 
   console.log(
     `%c[LLM Guard] Actif sur ${ACTIVE_LLM.name} (mode: ${CONFIG.mode})`,

@@ -134,6 +134,69 @@
         if (m.content !== undefined) m.content = text;
       },
     },
+    // Mistral Le Chat — OpenAI-compatible messages[] with string content.
+    mistral: {
+      messagesField: "messages",
+      isUserMessage: (m) => m.role === "user",
+      getMessageText: (m) => {
+        if (typeof m.content === "string") return m.content;
+        if (Array.isArray(m.content)) {
+          return m.content
+            .filter((c) => c.type === "text" || typeof c.text === "string")
+            .map((c) => c.text || "")
+            .join(" ");
+        }
+        return "";
+      },
+      setMessageText: (m, text) => {
+        if (typeof m.content === "string") {
+          m.content = text;
+        } else if (Array.isArray(m.content)) {
+          for (const c of m.content) {
+            if (c.type === "text" || typeof c.text === "string") c.text = text;
+          }
+        }
+      },
+    },
+    // Perplexity — uses messages[] for ask/chat endpoints; some single-shot
+    // search endpoints carry the prompt as top-level `query`.
+    perplexity: {
+      promptField: "query",
+      messagesField: "messages",
+      isUserMessage: (m) => m.role === "user",
+      getMessageText: (m) => {
+        if (typeof m.content === "string") return m.content;
+        return "";
+      },
+      setMessageText: (m, text) => {
+        if (typeof m.content === "string") m.content = text;
+      },
+    },
+    // DeepSeek — OpenAI-compatible messages[] with string content.
+    deepseek: {
+      messagesField: "messages",
+      isUserMessage: (m) => m.role === "user",
+      getMessageText: (m) => (typeof m.content === "string" ? m.content : ""),
+      setMessageText: (m, text) => {
+        if (typeof m.content === "string") m.content = text;
+      },
+    },
+    // Grok (x.ai / grok.com) — conversation endpoints carry the user turn in
+    // a top-level `message` string; some endpoints use `messages[]`.
+    grok: {
+      promptField: "message",
+      messagesField: "messages",
+      isUserMessage: (m) => m.role === "user" || m.sender === "user",
+      getMessageText: (m) => {
+        if (typeof m.message === "string") return m.message;
+        if (typeof m.content === "string") return m.content;
+        return "";
+      },
+      setMessageText: (m, text) => {
+        if (typeof m.message === "string") m.message = text;
+        if (typeof m.content === "string") m.content = text;
+      },
+    },
   };
 
   // Browser (Chrome MAIN world)
