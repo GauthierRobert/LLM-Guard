@@ -1,9 +1,12 @@
 {
-  # Replace with your domain. For local dev use http:// with :80.
-  email ops@example.com
+  # Local dev: serve over plain HTTP on :80 (no TLS, no public domain).
+  # For production, replace :80 with your domain (e.g. dashboard.example.com)
+  # and uncomment the email line so Caddy can obtain Let's Encrypt certs.
+  # email ops@example.com
+  auto_https off
 }
 
-dashboard.example.com {
+:80 {
   encode zstd gzip
 
   # API + WebSockets live stream
