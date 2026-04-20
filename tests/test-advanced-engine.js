@@ -76,6 +76,17 @@ test("Levenshtein : 2 lettres changées = 2", () => {
   assert(levenshtein("salaire", "saluere") === 2, `Obtenu: ${levenshtein("salaire", "saluere")}`);
 });
 
+test("Levenshtein : maxDistance bail-out retourne max+1", () => {
+  // 5 changements, budget=1 → l'algo doit abandonner tôt et renvoyer 2.
+  const d = levenshtein("abcde", "xxxxx", 1);
+  assert(d === 2, `maxDistance=1 devrait renvoyer 2 (sentinel), obtenu: ${d}`);
+});
+
+test("Levenshtein : maxDistance n'altère pas le résultat quand la distance rentre", () => {
+  assert(levenshtein("salaire", "saluere", 2) === 2, "Résultat inchangé quand distance ≤ maxDistance");
+  assert(levenshtein("salaire", "salaire", 0) === 0, "Identique reste 0");
+});
+
 // --- Normalisation ---
 test("Normalise le leetspeak : s4l41r3 → salaire", () => {
   assert(normalize("s4l41r3") === "salaire", `Obtenu: ${normalize("s4l41r3")}`);

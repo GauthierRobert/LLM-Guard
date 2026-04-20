@@ -195,7 +195,7 @@
         for (const word of words) {
           const normalizedWord = normalize(word);
           if (Math.abs(normalizedWord.length - normalizedKw.length) > 2) continue;
-          const distance = levenshtein(normalizedWord, normalizedKw);
+          const distance = levenshtein(normalizedWord, normalizedKw, threshold);
           if (distance > 0 && distance <= threshold) {
             findings.push({
               type: `Mot-clé (approx): ${kw.term}`,
@@ -221,15 +221,21 @@
     if (layer4InitPromise) return layer4InitPromise;
     const factory = window.__llmGuard?.layer4?.Layer4Classifier;
     if (!factory) return null;
+    // Always clear layer4InitPromise when the init attempt settles — on
+    // failure as well — otherwise a single transient Presidio outage would
+    // keep returning the rejected promise for the rest of the session.
     layer4InitPromise = (async () => {
-      const inst = new factory({
-        presidioUrl: CONFIG.layer4.presidioUrl,
-        enableBrowserNLP: false,
-      });
-      await inst.init();
-      layer4Instance = inst;
-      layer4InitPromise = null;
-      return inst.activeClassifier ? inst : null;
+      try {
+        const inst = new factory({
+          presidioUrl: CONFIG.layer4.presidioUrl,
+          enableBrowserNLP: false,
+        });
+        await inst.init();
+        layer4Instance = inst;
+        return inst.activeClassifier ? inst : null;
+      } finally {
+        layer4InitPromise = null;
+      }
     })();
     return layer4InitPromise;
   }
@@ -276,12 +282,17 @@
 
     const findings = [];
 
-    // Layer 1: Regex
+    // Layer 1: Regex. `pattern.validate` is an optional post-match hook that
+    // drops structurally-plausible but semantically invalid matches (Luhn,
+    // octet bounds, reserved example domains, etc.).
     for (const pattern of PII_PATTERNS) {
       const regex = new RegExp(pattern.regex.source, pattern.regex.flags);
       const matches = text.match(regex);
       if (matches) {
-        const filtered = matches.filter((m) => !isAllowlisted(m, pattern.name));
+        const filtered = matches.filter((m) =>
+          !isAllowlisted(m, pattern.name) &&
+          (typeof pattern.validate !== "function" || pattern.validate(m))
+        );
         if (filtered.length > 0) {
           findings.push({
             type: pattern.name,

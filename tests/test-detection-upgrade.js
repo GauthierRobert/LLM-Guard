@@ -110,7 +110,7 @@ console.log("\n\x1b[1mHashed placeholder strategy\x1b[0m");
 
 test("hashed placeholders use hex instead of counters", () => {
   const a = createAnonymizer({ patterns: PII_PATTERNS, placeholderStrategy: "hashed", sessionSalt: "fixed" });
-  const r = a.anonymize("ping alice@example.com");
+  const r = a.anonymize("ping alice@acme.com");
   const [ph] = [...r.mappings.keys()];
   assert.match(ph, /^\[EMAIL_[0-9a-f]{6}\]$/, `expected hex placeholder, got ${ph}`);
 });
@@ -134,9 +134,9 @@ test("different sessions produce different placeholders for the same value", () 
 
 test("deanonymize restores original from hashed placeholder", () => {
   const a = createAnonymizer({ patterns: PII_PATTERNS, placeholderStrategy: "hashed", sessionSalt: "s" });
-  const r = a.anonymize("contact alice@example.com");
+  const r = a.anonymize("contact alice@acme.com");
   const ph = [...r.mappings.keys()][0];
-  assert.strictEqual(a.deanonymize(`reply to ${ph}`), "reply to alice@example.com");
+  assert.strictEqual(a.deanonymize(`reply to ${ph}`), "reply to alice@acme.com");
 });
 
 test("counter strategy is still the default (backward compat)", () => {

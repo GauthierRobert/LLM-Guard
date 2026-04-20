@@ -22,19 +22,19 @@ console.log("\n\x1b[1m🔐 Anonymizer — collision fix (bug A)\x1b[0m");
 
 test("successive anonymize calls mint distinct placeholders", () => {
   const a = createAnonymizer({ patterns: PII_PATTERNS });
-  const r1 = a.anonymize("Mon email est alice@example.com.");
-  const r2 = a.anonymize("Et aussi bob@example.com.");
+  const r1 = a.anonymize("Mon email est alice@acme.com.");
+  const r2 = a.anonymize("Et aussi bob@acme.com.");
   const p1 = [...r1.mappings.keys()][0];
   const p2 = [...r2.mappings.keys()][0];
   assert(p1 !== p2, `placeholders aliased across prompts: both "${p1}"`);
-  eq(a.anonymizationMap.get(p1), "alice@example.com");
-  eq(a.anonymizationMap.get(p2), "bob@example.com");
+  eq(a.anonymizationMap.get(p1), "alice@acme.com");
+  eq(a.anonymizationMap.get(p2), "bob@acme.com");
 });
 
 test("same value reused across prompts keeps a single placeholder", () => {
   const a = createAnonymizer({ patterns: PII_PATTERNS });
-  const r1 = a.anonymize("Contact: alice@example.com");
-  const r2 = a.anonymize("Réécrire alice@example.com stp");
+  const r1 = a.anonymize("Contact: alice@acme.com");
+  const r2 = a.anonymize("Réécrire alice@acme.com stp");
   const p1 = [...r1.mappings.keys()][0];
   const p2 = [...r2.mappings.keys()][0];
   eq(p1, p2, "same PII value should reuse the same placeholder");
@@ -55,11 +55,11 @@ test("three distinct emails across three prompts keep all mappings intact", () =
 
 test("de-anonymization restores the correct value for old turns", () => {
   const a = createAnonymizer({ patterns: PII_PATTERNS });
-  const r1 = a.anonymize("alice@example.com wrote");
+  const r1 = a.anonymize("alice@acme.com wrote");
   const p1 = [...r1.mappings.keys()][0];
-  a.anonymize("bob@example.com replied");
+  a.anonymize("bob@acme.com replied");
   // A later LLM response still references the first placeholder.
-  eq(a.deanonymize(`About ${p1}: ...`), "About alice@example.com: ...");
+  eq(a.deanonymize(`About ${p1}: ...`), "About alice@acme.com: ...");
 });
 
 console.log("\n\x1b[1m🔐 Anonymizer — stream chunk fix (bug B)\x1b[0m");
@@ -76,33 +76,33 @@ function streamDeanonInChunks(anon, full, size) {
 
 test("placeholder split across 3-byte chunks is restored", () => {
   const a = createAnonymizer({ patterns: PII_PATTERNS });
-  const r = a.anonymize("Écris à alice@example.com");
+  const r = a.anonymize("Écris à alice@acme.com");
   const ph = [...r.mappings.keys()][0]; // e.g. "[EMAIL_1]"
   const llmAnswer = `D'accord, j'envoie à ${ph} demain.`;
   const restored = streamDeanonInChunks(a, llmAnswer, 3);
-  eq(restored, "D'accord, j'envoie à alice@example.com demain.");
+  eq(restored, "D'accord, j'envoie à alice@acme.com demain.");
 });
 
 test("two placeholders back-to-back across chunks are both restored", () => {
   const a = createAnonymizer({ patterns: PII_PATTERNS });
-  const r = a.anonymize("alice@example.com et bob@example.com");
+  const r = a.anonymize("alice@acme.com et bob@acme.com");
   const [p1, p2] = [...r.mappings.keys()];
   const llmAnswer = `Contacts: ${p1}, ${p2}. Fin.`;
-  eq(streamDeanonInChunks(a, llmAnswer, 1), "Contacts: alice@example.com, bob@example.com. Fin.");
-  eq(streamDeanonInChunks(a, llmAnswer, 4), "Contacts: alice@example.com, bob@example.com. Fin.");
-  eq(streamDeanonInChunks(a, llmAnswer, 7), "Contacts: alice@example.com, bob@example.com. Fin.");
+  eq(streamDeanonInChunks(a, llmAnswer, 1), "Contacts: alice@acme.com, bob@acme.com. Fin.");
+  eq(streamDeanonInChunks(a, llmAnswer, 4), "Contacts: alice@acme.com, bob@acme.com. Fin.");
+  eq(streamDeanonInChunks(a, llmAnswer, 7), "Contacts: alice@acme.com, bob@acme.com. Fin.");
 });
 
 test("text with no placeholder passes through unchanged even in 1-char chunks", () => {
   const a = createAnonymizer({ patterns: PII_PATTERNS });
-  a.anonymize("seed alice@example.com"); // populate maxPlaceholderLen
+  a.anonymize("seed alice@acme.com"); // populate maxPlaceholderLen
   const text = "Bonjour, aucun PII ici. [crochet littéral]";
   eq(streamDeanonInChunks(a, text, 1), text);
 });
 
 test("unfinished placeholder at stream end is flushed verbatim", () => {
   const a = createAnonymizer({ patterns: PII_PATTERNS });
-  a.anonymize("alice@example.com");
+  a.anonymize("alice@acme.com");
   // LLM hallucinates a half-written placeholder that never completes.
   const text = "Erreur: fragment [EMA";
   eq(streamDeanonInChunks(a, text, 2), "Erreur: fragment [EMA");

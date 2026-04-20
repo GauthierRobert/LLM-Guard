@@ -5,21 +5,55 @@
 (function () {
   "use strict";
 
-  function levenshtein(a, b) {
+  // Two-row DP: only the previous and current rows are needed, so space is
+  // O(min(m, n)) instead of O(m * n). The `maxDistance` hint lets callers
+  // short-circuit as soon as the minimum value on the current row exceeds
+  // the budget — at that point the final distance is guaranteed to exceed
+  // `maxDistance` too (each step can only add to the running minimum).
+  function levenshtein(a, b, maxDistance) {
+    if (a === b) return 0;
+    // Keep the shorter string as the column axis to minimise row allocation.
+    if (a.length < b.length) { const t = a; a = b; b = t; }
     const m = a.length, n = b.length;
-    const dp = Array.from({ length: m + 1 }, () => Array(n + 1).fill(0));
-    for (let i = 0; i <= m; i++) dp[i][0] = i;
-    for (let j = 0; j <= n; j++) dp[0][j] = j;
-    for (let i = 1; i <= m; i++) {
-      for (let j = 1; j <= n; j++) {
-        dp[i][j] = Math.min(
-          dp[i - 1][j] + 1,
-          dp[i][j - 1] + 1,
-          dp[i - 1][j - 1] + (a[i - 1] === b[j - 1] ? 0 : 1)
-        );
-      }
+    if (n === 0) return m;
+    if (Number.isFinite(maxDistance) && Math.abs(m - n) > maxDistance) {
+      return maxDistance + 1;
     }
-    return dp[m][n];
+    let prev = new Array(n + 1);
+    let curr = new Array(n + 1);
+    for (let j = 0; j <= n; j++) prev[j] = j;
+    for (let i = 1; i <= m; i++) {
+      curr[0] = i;
+      let rowMin = curr[0];
+      for (let j = 1; j <= n; j++) {
+        const cost = a[i - 1] === b[j - 1] ? 0 : 1;
+        const v = Math.min(prev[j] + 1, curr[j - 1] + 1, prev[j - 1] + cost);
+        curr[j] = v;
+        if (v < rowMin) rowMin = v;
+      }
+      if (Number.isFinite(maxDistance) && rowMin > maxDistance) {
+        return maxDistance + 1;
+      }
+      const tmp = prev; prev = curr; curr = tmp;
+    }
+    return prev[n];
+  }
+
+  // Luhn checksum — used to gate credit-card, SIREN, and SIRET regex matches.
+  // Accepts any string; non-digit characters are stripped before checking.
+  function luhn(digits) {
+    const s = String(digits).replace(/\D/g, "");
+    if (s.length < 2) return false;
+    let sum = 0;
+    let alt = false;
+    for (let i = s.length - 1; i >= 0; i--) {
+      let d = s.charCodeAt(i) - 48;
+      if (d < 0 || d > 9) return false;
+      if (alt) { d *= 2; if (d > 9) d -= 9; }
+      sum += d;
+      alt = !alt;
+    }
+    return sum % 10 === 0;
   }
 
   function normalize(text) {
@@ -123,11 +157,11 @@
   // Browser (Chrome MAIN world)
   if (typeof window !== "undefined") {
     window.__llmGuard = window.__llmGuard || {};
-    window.__llmGuard.utils = { levenshtein, normalize, maskPII, getMaxSeverity, deduplicateFindings, sha256Hex, formatBytes, fnv1aHex, createLRU };
+    window.__llmGuard.utils = { levenshtein, luhn, normalize, maskPII, getMaxSeverity, deduplicateFindings, sha256Hex, formatBytes, fnv1aHex, createLRU };
   }
 
   // Node.js (tests)
   if (typeof module !== "undefined" && module.exports) {
-    module.exports = { levenshtein, normalize, maskPII, getMaxSeverity, deduplicateFindings, sha256Hex, formatBytes, fnv1aHex, createLRU };
+    module.exports = { levenshtein, luhn, normalize, maskPII, getMaxSeverity, deduplicateFindings, sha256Hex, formatBytes, fnv1aHex, createLRU };
   }
 })();
