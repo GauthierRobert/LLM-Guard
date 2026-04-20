@@ -103,10 +103,21 @@ function defaultStats() {
     flaggedPrompts: 0,
     blockedPrompts: 0,
     anonymizedPrompts: 0,
+    attachmentsScanned: 0,
+    attachmentsBlocked: 0,
+    attachmentsFlagged: 0,
     piiByType: {},
     byLLM: {},
   };
 }
+
+const ATTACHMENT_ACTIONS = new Set([
+  "ATTACHMENT_CLEAN",
+  "ATTACHMENT_PII_DETECTED",
+  "ATTACHMENT_BLOCKED",
+  "ATTACHMENT_DETECTED",
+  "ATTACHMENT_UNSCANNED",
+]);
 
 async function storeLog(event) {
   const result = await chrome.storage.local.get(["guard_logs", "guard_stats"]);
@@ -116,11 +127,22 @@ async function storeLog(event) {
   logs.unshift(event);
   if (logs.length > 1000) logs.length = 1000;
 
-  stats.totalPrompts++;
-  if (event.action === "CLEAN") stats.cleanPrompts++;
-  if (event.action === "PII_DETECTED") stats.flaggedPrompts++;
-  if (event.action === "BLOCKED") stats.blockedPrompts++;
-  if (event.action === "ANONYMIZED") stats.anonymizedPrompts++;
+  const isAttachment = ATTACHMENT_ACTIONS.has(event.action);
+
+  if (isAttachment) {
+    if (stats.attachmentsScanned == null) stats.attachmentsScanned = 0;
+    if (stats.attachmentsBlocked == null) stats.attachmentsBlocked = 0;
+    if (stats.attachmentsFlagged == null) stats.attachmentsFlagged = 0;
+    stats.attachmentsScanned++;
+    if (event.action === "ATTACHMENT_BLOCKED") stats.attachmentsBlocked++;
+    else if (event.action === "ATTACHMENT_PII_DETECTED" || event.action === "ATTACHMENT_DETECTED") stats.attachmentsFlagged++;
+  } else {
+    stats.totalPrompts++;
+    if (event.action === "CLEAN") stats.cleanPrompts++;
+    if (event.action === "PII_DETECTED") stats.flaggedPrompts++;
+    if (event.action === "BLOCKED") stats.blockedPrompts++;
+    if (event.action === "ANONYMIZED") stats.anonymizedPrompts++;
+  }
 
   if (event.findings) {
     for (const f of event.findings) {
@@ -131,26 +153,31 @@ async function storeLog(event) {
   // Stats par LLM
   const llm = event.llm || "Unknown";
   if (!stats.byLLM[llm]) {
-    stats.byLLM[llm] = { total: 0, clean: 0, flagged: 0, blocked: 0, anonymized: 0 };
+    stats.byLLM[llm] = { total: 0, clean: 0, flagged: 0, blocked: 0, anonymized: 0, attachments: 0 };
   }
-  stats.byLLM[llm].total++;
-  if (event.action === "CLEAN") stats.byLLM[llm].clean++;
-  if (event.action === "PII_DETECTED") stats.byLLM[llm].flagged++;
-  if (event.action === "BLOCKED") stats.byLLM[llm].blocked++;
-  if (event.action === "ANONYMIZED") stats.byLLM[llm].anonymized++;
+  if (stats.byLLM[llm].attachments == null) stats.byLLM[llm].attachments = 0;
+  if (isAttachment) {
+    stats.byLLM[llm].attachments++;
+  } else {
+    stats.byLLM[llm].total++;
+    if (event.action === "CLEAN") stats.byLLM[llm].clean++;
+    if (event.action === "PII_DETECTED") stats.byLLM[llm].flagged++;
+    if (event.action === "BLOCKED") stats.byLLM[llm].blocked++;
+    if (event.action === "ANONYMIZED") stats.byLLM[llm].anonymized++;
+  }
 
   await chrome.storage.local.set({ guard_logs: logs, guard_stats: stats });
 }
 
 function updateBadge(event) {
-  if (event.action === "BLOCKED") {
+  if (event.action === "BLOCKED" || event.action === "ATTACHMENT_BLOCKED") {
     chrome.action.setBadgeBackgroundColor({ color: "#A32D2D" });
     chrome.action.setBadgeText({ text: "!" });
   } else if (event.action === "ANONYMIZED") {
     chrome.action.setBadgeBackgroundColor({ color: "#0F6E56" });
     chrome.action.setBadgeText({ text: "\u2713" });
     setTimeout(() => chrome.action.setBadgeText({ text: "" }), 3000);
-  } else if (event.action === "PII_DETECTED") {
+  } else if (event.action === "PII_DETECTED" || event.action === "ATTACHMENT_PII_DETECTED" || event.action === "ATTACHMENT_DETECTED") {
     chrome.action.setBadgeBackgroundColor({ color: "#854F0B" });
     chrome.action.setBadgeText({ text: "\u26A0" });
     setTimeout(() => chrome.action.setBadgeText({ text: "" }), 5000);

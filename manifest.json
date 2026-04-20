@@ -28,7 +28,7 @@
         "https://gemini.google.com/*",
         "https://copilot.microsoft.com/*"
       ],
-      "js": ["rules/pii-patterns.js", "rules/sensitive-keywords.js", "rules/sensitive-keywords-categorized.js", "rules/context-rules.js", "config/company-rules.js", "rules/allowlist.js", "utils.js", "ui.js", "llm-adapters.js", "layer4-local.js", "anonymizer.js", "content.js"],
+      "js": ["rules/pii-patterns.js", "rules/sensitive-keywords.js", "rules/sensitive-keywords-categorized.js", "rules/context-rules.js", "config/company-rules.js", "rules/allowlist.js", "utils.js", "ui.js", "llm-adapters.js", "layer4-local.js", "anonymizer.js", "extractors/text-extractor.js", "extractors/pdf-extractor.js", "extractors/ocr-extractor.js", "attachment-scanner.js", "content.js"],
       "run_at": "document_start",
       "world": "MAIN"
     },
@@ -42,6 +42,18 @@
       ],
       "js": ["bridge.js"],
       "run_at": "document_start"
+    }
+  ],
+  "web_accessible_resources": [
+    {
+      "resources": ["vendor/pdfjs/*", "vendor/tesseract/*", "vendor/tesseract/lang-data/*"],
+      "matches": [
+        "https://chatgpt.com/*",
+        "https://chat.openai.com/*",
+        "https://claude.ai/*",
+        "https://gemini.google.com/*",
+        "https://copilot.microsoft.com/*"
+      ]
     }
   ],
   "action": {

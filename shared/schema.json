@@ -16,6 +16,7 @@
     "promptLength",
     "mappingsCount",
     "findings",
+    "attachment",
     "extensionVersion",
     "schemaVersion"
   ],
@@ -61,8 +62,18 @@
     },
     "action": {
       "type": "string",
-      "enum": ["CLEAN", "ANONYMIZED", "PII_DETECTED", "BLOCKED"],
-      "description": "Action taken by the extension."
+      "enum": [
+        "CLEAN",
+        "ANONYMIZED",
+        "PII_DETECTED",
+        "BLOCKED",
+        "ATTACHMENT_CLEAN",
+        "ATTACHMENT_PII_DETECTED",
+        "ATTACHMENT_BLOCKED",
+        "ATTACHMENT_DETECTED",
+        "ATTACHMENT_UNSCANNED"
+      ],
+      "description": "Action taken by the extension. ATTACHMENT_* variants correspond to file-upload scans (Phase 1 attachment pipeline)."
     },
     "endpoint": {
       "type": ["string", "null"],
@@ -94,6 +105,13 @@
       "maxItems": 50,
       "items": { "$ref": "#/$defs/Finding" }
     },
+    "attachment": {
+      "description": "Metadata about the attached file when the event corresponds to an ATTACHMENT_* action. Null for plain prompt events. Never contains raw file bytes or extracted text.",
+      "oneOf": [
+        { "type": "null" },
+        { "$ref": "#/$defs/Attachment" }
+      ]
+    },
     "extensionVersion": {
       "type": "string",
       "pattern": "^\\d+\\.\\d+\\.\\d+$",
@@ -124,6 +142,29 @@
           "type": "integer",
           "minimum": 1
         }
+      }
+    },
+    "Attachment": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "sha256": {
+          "type": "string",
+          "maxLength": 64,
+          "pattern": "^[a-f0-9]*$",
+          "description": "SHA-256 of the file bytes in lowercase hex. Used for de-duplication and 'mark safe' entries."
+        },
+        "mimeType": { "type": "string", "maxLength": 128 },
+        "sizeBytes": { "type": "integer", "minimum": 0 },
+        "extractedChars": { "type": "integer", "minimum": 0 },
+        "truncated": { "type": "boolean" },
+        "extractorId": {
+          "type": ["string", "null"],
+          "maxLength": 32,
+          "description": "Which extractor handled the file (e.g. 'pdf', 'image', 'text')."
+        },
+        "unavailable": { "type": "boolean", "description": "True when the extractor vendor library was missing." },
+        "passwordProtected": { "type": "boolean" }
       }
     }
   }

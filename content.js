@@ -11,12 +11,13 @@
   // ─── Shared modules (loaded by manifest before this file) ──
   const { PII_PATTERNS } = window.__llmGuard.patterns;
   const { SENSITIVE_KEYWORDS } = window.__llmGuard.keywords;
-  const { maskPII, levenshtein, normalize } = window.__llmGuard.utils;
+  const { maskPII, levenshtein, normalize, sha256Hex, fnv1aHex, createLRU } = window.__llmGuard.utils;
   const { showBanner, addStatusBadge, logEvent } = window.__llmGuard.ui;
   const { CONTEXT_RULES } = window.__llmGuard.contextRules;
   const { SENSITIVE_KEYWORDS_CATEGORIZED } = window.__llmGuard.keywordsCategorized;
   const { extractPrompt, injectAnonymized, LLM_ADAPTERS } = window.__llmGuard.adapters;
-  const { isAllowlisted } = window.__llmGuard.allowlist;
+  const { isAllowlisted, isAttachmentAllowlisted } = window.__llmGuard.allowlist;
+  const attachmentScanner = window.__llmGuard.attachmentScanner;
   const companyConfig = (window.__llmGuard.companyConfig) || { whitelist: [], blacklist: [], blacklistRegex: [] };
 
   // ─── Détection du LLM courant ────────────────────────────────
@@ -64,7 +65,27 @@
     bannerDuration: 8000,
     maxMapSize: 5000,
     layer4: { enabled: false, presidioUrl: "" },
+    attachment: {
+      enabled: true,
+      mode: "inherit",
+      maxSizeBytes: 20 * 1024 * 1024,
+      maxChars: 200_000,
+      types: { pdf: true, image: true, text: true },
+    },
   };
+
+  // Upload endpoints per LLM. Any POST/PUT matching one of these URL regexes
+  // is inspected for File/Blob/FormData bodies even if the endpoint isn't the
+  // normal prompt endpoint. The DOM-level hook is the happy path — this is
+  // the safety net.
+  const UPLOAD_URL_PATTERNS = [
+    /\/backend-api\/files/i,
+    /files\.oaiusercontent\.com/i,
+    /\/api\/organizations\/[^/]+\/(upload|files)/i,
+    /uploads?\.google\.com|upload\.googleusercontent\.com/i,
+    /\/upload\/drive\/v3\/files/i,
+    /blob\.core\.windows\.net/i,
+  ];
 
   // Sync mode + layer4 config from storage via bridge
   window.addEventListener("message", (evt) => {
@@ -84,12 +105,25 @@
     if (evt.data.type === "layer4Update") {
       const next = evt.data.layer4 || {};
       const urlChanged = next.presidioUrl !== CONFIG.layer4.presidioUrl;
+      const enabledChanged = !!next.enabled !== CONFIG.layer4.enabled;
       CONFIG.layer4 = {
         enabled: !!next.enabled,
         presidioUrl: next.presidioUrl || "",
       };
       // Force re-init on next scan if URL changed or toggle flipped
       if (urlChanged) layer4Instance = null;
+      if (urlChanged || enabledChanged) invalidateScanCache();
+    }
+
+    if (evt.data.type === "attachmentConfigUpdate") {
+      const next = evt.data.attachment || {};
+      CONFIG.attachment = {
+        enabled: next.enabled !== false,
+        mode: next.mode || "inherit",
+        maxSizeBytes: Number.isFinite(next.maxSizeBytes) ? next.maxSizeBytes : CONFIG.attachment.maxSizeBytes,
+        maxChars: Number.isFinite(next.maxChars) ? next.maxChars : CONFIG.attachment.maxChars,
+        types: { ...CONFIG.attachment.types, ...(next.types || {}) },
+      };
     }
   });
 
@@ -102,6 +136,7 @@
     patterns: PII_PATTERNS,
     isAllowlisted,
     maxMapSize: CONFIG.maxMapSize,
+    placeholderStrategy: "hashed",
     onOverflow: (size) => {
       console.warn(`[LLM Guard] Anonymization map exceeded ${CONFIG.maxMapSize} entries; oldest mappings evicted. De-anonymization of old turns may fail.`);
       logEvent({ action: "MAP_OVERFLOW", mappingsCount: size }, ACTIVE_LLM);
@@ -223,8 +258,22 @@
     }
   }
 
+  // ─── Detection cache ─────────────────────────────────────────
+  // Short-circuits the full pipeline when the same prompt is scanned twice
+  // in quick succession. Typical triggers: a user clicks Send twice, the
+  // site retries a failed request, or a streaming UI resubmits the prompt.
+  // Cleared when layer4 or attachment config changes — those are the only
+  // config knobs that affect findings.
+  const scanCache = createLRU(200);
+  const cacheKey = (text) => fnv1aHex(text) + ":" + fnv1aHex(text.length + "|" + (CONFIG.layer4.enabled ? 1 : 0));
+  function invalidateScanCache() { scanCache.clear(); }
+
   // ─── Scanner (all layers active) ─────────────────────────────
   async function scanForPII(text) {
+    const key = cacheKey(text);
+    const cached = scanCache.get(key);
+    if (cached) return cached.map((f) => ({ ...f, cached: true }));
+
     const findings = [];
 
     // Layer 1: Regex
@@ -285,8 +334,174 @@
       findings.push(...(await scanLayer4(text)));
     }
 
+    scanCache.set(key, findings);
     return findings;
   }
+
+  // ─── Attachment handling ─────────────────────────────────────
+  // WeakMap so GC can reclaim entries once the File goes out of scope.
+  const attachmentScanCache = new WeakMap();
+
+  function resolveAttachmentMode() {
+    const m = CONFIG.attachment.mode;
+    if (m === "block" || m === "warn") return m;
+    // inherit: map global mode. "anonymize" => block (binary can't be anonymized in place).
+    return CONFIG.mode === "block" || CONFIG.mode === "anonymize" ? "block" : "warn";
+  }
+
+  async function ensureAttachmentScan(file) {
+    if (!attachmentScanner || !CONFIG.attachment.enabled) return null;
+    const cached = attachmentScanCache.get(file);
+    if (cached) return cached;
+
+    const promise = (async () => {
+      const scan = await attachmentScanner.scanAttachment(file, {
+        maxSizeBytes: CONFIG.attachment.maxSizeBytes,
+        maxChars: CONFIG.attachment.maxChars,
+        types: CONFIG.attachment.types,
+      });
+
+      let sha256 = "";
+      try {
+        const buf = await file.arrayBuffer();
+        sha256 = await sha256Hex(buf);
+      } catch { /* non-fatal */ }
+
+      const allowlisted = sha256 && isAttachmentAllowlisted(sha256, scan.filename);
+      const findings = (!allowlisted && scan.text) ? await scanForPII(scan.text) : [];
+
+      return {
+        sha256,
+        allowlisted,
+        filename: scan.filename,
+        mimeType: scan.mimeType,
+        sizeBytes: scan.sizeBytes,
+        extractorId: scan.extractorId,
+        truncated: !!scan.truncated,
+        unavailable: !!scan.unavailable,
+        passwordProtected: !!scan.passwordProtected,
+        skipped: !!scan.skipped,
+        reason: scan.reason,
+        extractedChars: (scan.text || "").length,
+        findings,
+        anonymizedText: scan.text ? anonymizeText(scan.text).anonymized : "",
+      };
+    })();
+
+    attachmentScanCache.set(file, promise);
+    return promise;
+  }
+
+  async function scanAttachmentsForRequest(files) {
+    const results = [];
+    for (const f of files) {
+      try {
+        const r = await ensureAttachmentScan(f);
+        if (r) results.push(r);
+      } catch (err) {
+        console.warn("[LLM Guard] attachment scan error:", err?.message || err);
+      }
+    }
+    return results;
+  }
+
+  /**
+   * Decide what to do with a request that carries attachments.
+   * Returns `{ block: boolean, results }` — when `block` is true the caller
+   * should short-circuit the upload with a 403-style response.
+   */
+  async function handleAttachmentRequest(files, url) {
+    const results = await scanAttachmentsForRequest(files);
+    if (results.length === 0) return { block: false, results };
+
+    const anyFindings = results.some((r) => r.findings.length > 0);
+    const anyUnscanned = results.some((r) => r.unavailable || r.passwordProtected);
+
+    if (!anyFindings && !anyUnscanned) {
+      for (const r of results) {
+        logEvent({
+          action: "ATTACHMENT_CLEAN",
+          endpoint: url,
+          findings: [],
+          attachment: attachmentLogPayload(r),
+        }, ACTIVE_LLM);
+      }
+      return { block: false, results };
+    }
+
+    const mode = resolveAttachmentMode();
+    const shouldBlock = mode === "block" && anyFindings;
+    const primary = results.find((r) => r.findings.length > 0) || results[0];
+    const combinedFindings = results.flatMap((r) => r.findings);
+
+    showBanner(combinedFindings, shouldBlock ? "ATTACHMENT_BLOCKED" : "ATTACHMENT_DETECTED", 0, ACTIVE_LLM, CONFIG, {
+      filename: primary.filename,
+      sizeBytes: primary.sizeBytes,
+      mimeType: primary.mimeType,
+      truncated: primary.truncated,
+      unavailable: primary.unavailable,
+      passwordProtected: primary.passwordProtected,
+      anonymizedText: primary.anonymizedText,
+      sha256: primary.sha256,
+    });
+
+    for (const r of results) {
+      logEvent({
+        action: shouldBlock ? "ATTACHMENT_BLOCKED" : (r.findings.length > 0 ? "ATTACHMENT_PII_DETECTED" : "ATTACHMENT_UNSCANNED"),
+        endpoint: url,
+        findings: r.findings,
+        attachment: attachmentLogPayload(r),
+      }, ACTIVE_LLM);
+    }
+
+    return { block: shouldBlock, results };
+  }
+
+  function attachmentLogPayload(r) {
+    return {
+      sha256: r.sha256 || "",
+      mimeType: r.mimeType || "",
+      sizeBytes: r.sizeBytes || 0,
+      extractedChars: r.extractedChars || 0,
+      truncated: !!r.truncated,
+      extractorId: r.extractorId || null,
+      unavailable: !!r.unavailable,
+      passwordProtected: !!r.passwordProtected,
+    };
+  }
+
+  function looksLikeUploadUrl(url) {
+    if (!url) return false;
+    return UPLOAD_URL_PATTERNS.some((re) => re.test(url));
+  }
+
+  // ─── DOM hooks: pre-scan files as soon as the user attaches them ──
+  function prescanFiles(fileList) {
+    if (!fileList || !fileList.length) return;
+    if (!CONFIG.attachment.enabled) return;
+    for (const f of fileList) {
+      // Kick off scans eagerly — results land in the WeakMap for the
+      // fetch/XHR patches to pick up when the site actually uploads.
+      ensureAttachmentScan(f).catch(() => {});
+    }
+  }
+
+  document.addEventListener("change", (e) => {
+    const t = e.target;
+    if (t && t.tagName === "INPUT" && t.type === "file") {
+      prescanFiles(t.files);
+    }
+  }, true);
+
+  document.addEventListener("paste", (e) => {
+    const items = e.clipboardData?.files;
+    if (items && items.length) prescanFiles(items);
+  }, true);
+
+  document.addEventListener("drop", (e) => {
+    const items = e.dataTransfer?.files;
+    if (items && items.length) prescanFiles(items);
+  }, true);
 
   // ─── Monkey-patch fetch ──────────────────────────────────────
   window.__originalFetch = window.fetch;
@@ -302,6 +517,21 @@
 
     const method =
       init?.method || (input instanceof Request ? input.method : "GET");
+
+    // ── Attachment upload branch ──
+    if (CONFIG.attachment.enabled && attachmentScanner && init?.body) {
+      const files = attachmentScanner.collectFiles(init.body);
+      if (files.length > 0 || looksLikeUploadUrl(url)) {
+        // Collect files from Request body if it's wrapped
+        const result = await handleAttachmentRequest(files, url);
+        if (result.block) {
+          return new Response(
+            JSON.stringify({ error: "Bloqué par LLM Guard — pièce jointe contenant des données sensibles." }),
+            { status: 403, headers: { "Content-Type": "application/json" } }
+          );
+        }
+      }
+    }
 
     const isTarget =
       method.toUpperCase() === "POST" && ACTIVE_LLM.endpointMatch.test(url);
@@ -397,6 +627,59 @@
 
     return originalFetch.apply(this, fetchArgs);
   };
+
+  // ─── XHR wrapper (upload safety net) ─────────────────────────
+  // Some LLMs (notably Gemini Drive uploads) use XMLHttpRequest instead of
+  // fetch. We enforce block mode only when a pre-scan result is already in
+  // the cache — XHR.send() is effectively synchronous so we can't await a
+  // scan without breaking page semantics. Cache hits come from the DOM hook.
+  const OriginalXHR = window.XMLHttpRequest;
+  if (OriginalXHR && OriginalXHR.prototype) {
+    const originalSend = OriginalXHR.prototype.send;
+    OriginalXHR.prototype.send = function (body) {
+      if (CONFIG.attachment.enabled && attachmentScanner && body) {
+        const files = attachmentScanner.collectFiles(body);
+        for (const f of files) {
+          const cached = attachmentScanCache.get(f);
+          if (!cached) {
+            // No pre-scan: kick one off for telemetry; can't block this send.
+            ensureAttachmentScan(f).catch(() => {});
+            continue;
+          }
+          cached.then((r) => {
+            if (r && r.findings.length > 0) {
+              const mode = resolveAttachmentMode();
+              const action = mode === "block" ? "ATTACHMENT_BLOCKED" : "ATTACHMENT_PII_DETECTED";
+              showBanner(r.findings, action, 0, ACTIVE_LLM, CONFIG, {
+                filename: r.filename,
+                sizeBytes: r.sizeBytes,
+                mimeType: r.mimeType,
+                truncated: r.truncated,
+                anonymizedText: r.anonymizedText,
+                sha256: r.sha256,
+              });
+              logEvent({
+                action,
+                endpoint: this.__llmGuardUrl || "",
+                findings: r.findings,
+                attachment: attachmentLogPayload(r),
+              }, ACTIVE_LLM);
+              if (mode === "block") {
+                try { this.abort(); } catch { /* already sent */ }
+              }
+            }
+          }).catch(() => {});
+        }
+      }
+      return originalSend.apply(this, arguments);
+    };
+
+    const originalOpen = OriginalXHR.prototype.open;
+    OriginalXHR.prototype.open = function (method, url) {
+      this.__llmGuardUrl = url;
+      return originalOpen.apply(this, arguments);
+    };
+  }
 
   // ─── Response de-anonymization ───────────────────────────────
   // Buffers across chunks so a placeholder split across a boundary

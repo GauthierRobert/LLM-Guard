@@ -121,6 +121,40 @@
     </div>
 
     <div class="section">
+      <div class="section-title">Pièces jointes (PDF, images, texte)</div>
+      <label class="toggle">
+        <input type="checkbox" id="opt-attachment-enabled">
+        <div class="toggle-text">
+          <strong>Scanner les fichiers uploadés</strong>
+          <span>Extrait le texte des PDF, images (OCR) et fichiers texte avant l'envoi au LLM. Appliqué automatiquement aux glisser-déposer et copier-coller.</span>
+        </div>
+      </label>
+      <label>
+        <span class="lbl">Comportement</span>
+        <select id="opt-attachment-mode" style="width:100%;background:#0e0f11;border:1px solid #2a2b30;border-radius:6px;padding:9px 11px;color:#d1d0c7;font-size:13px">
+          <option value="inherit">Hériter du mode global</option>
+          <option value="block">Toujours bloquer si PII</option>
+          <option value="warn">Toujours alerter (laisser passer)</option>
+        </select>
+        <span class="hint">En mode « hériter », Anonymiser/Bloquer globalement bloque l'upload et propose de copier le texte anonymisé à la place.</span>
+      </label>
+      <label>
+        <span class="lbl">Types analysés</span>
+        <div class="row" style="gap:14px">
+          <label style="display:inline-flex;align-items:center;gap:6px;margin:0"><input type="checkbox" id="opt-attachment-pdf"> PDF</label>
+          <label style="display:inline-flex;align-items:center;gap:6px;margin:0"><input type="checkbox" id="opt-attachment-image"> Images (OCR)</label>
+          <label style="display:inline-flex;align-items:center;gap:6px;margin:0"><input type="checkbox" id="opt-attachment-text"> Fichiers texte</label>
+        </div>
+        <span class="hint">Les librairies PDF.js et Tesseract.js se chargent à la première utilisation (~2 MB + modèles de langue). Voir <code>vendor/</code>.</span>
+      </label>
+      <label>
+        <span class="lbl">Taille maximum (Mo)</span>
+        <input type="text" id="opt-attachment-max-mb" placeholder="20" inputmode="numeric" autocomplete="off">
+        <span class="hint">Au-delà, le fichier est ignoré (enregistré comme <code>ATTACHMENT_UNSCANNED</code>).</span>
+      </label>
+    </div>
+
+    <div class="section">
       <div class="section-title">Détection sémantique (Couche 4)</div>
       <label class="toggle">
         <input type="checkbox" id="opt-layer4-enabled">

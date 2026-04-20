@@ -57,6 +57,38 @@
       severity: "medium",
       category: "Données de localisation",
     },
+    {
+      name: "Antécédent médical temporel",
+      description: "Personne identifiable + période + condition médicale (ex: « depuis 2019, Marie souffre de… »)",
+      personIndicators:
+        /(?:^|[\s'"])(?:patient|patiente|malade|employ[ée]+s?|salari[ée]+s?|coll[èe]gues?|M\.|Mme|Mr|ma\s+(?:fille|m[èe]re|s[œo]ur|femme|belle-m[èe]re)|mon\s+(?:fils|p[èe]re|fr[èe]re|mari|beau-p[èe]re))/im,
+      timeIndicators:
+        /(?:depuis\s+(?:19|20)\d{2}|depuis\s+\d+\s+(?:an|ans|mois|semaines?)|depuis\s+(?:janvier|f[ée]vrier|mars|avril|mai|juin|juillet|ao[ûu]t|septembre|octobre|novembre|d[ée]cembre)|il\s+y\s+a\s+\d+\s+(?:an|ans|mois))/i,
+      medicalIndicators:
+        /(?:op[ée]ration|chirurgie|cancer|diab[èe]te|d[ée]pression|anxi[ée]t[ée]|traitement|th[ée]rapie|psychiatre|grossesse|enceinte|handicap|VIH|s[ée]ropositif|alzheimer|parkinson|autisme|trouble\s+\w+|pathologie\s+\w+)/i,
+      severity: "high",
+      category: "Donnée de santé temporelle",
+    },
+    {
+      name: "Agrégat RH sensible",
+      description: "Décompte de personnes associé à un attribut sensible (ex: « 3 employés sont en arrêt »)",
+      countIndicators:
+        /\b(?:\d+|plusieurs|quelques|la\s+moiti[ée]|tous\s+les|toutes\s+les|certains|certaines)\s+(?:employ[ée]+s|salari[ée]+s|coll[èe]gues|candidats|candidates|stagiaires|membres?)\b/i,
+      sensitiveIndicators:
+        /(?:arr[êe]t\s+maladie|cong[ée]\s+(?:parental|maternit[ée]|paternit[ée]|maladie)|licenci[ée]+s?|harc[èe]lement|syndicat|gr[èe]ve|d[ée]pression|burn[-\s]?out|d[ée]mission|origine\s+(?:[ée]trang[èe]re|africaine|asiatique|maghr[ée]bine)|religion|orientation\s+sexuelle|handicap)/i,
+      severity: "high",
+      category: "Agrégat RH",
+    },
+    {
+      name: "Lien familial sensible",
+      description: "Relation familiale + donnée santé/finance/justice — l'identification se fait par ricochet",
+      familyIndicators:
+        /(?:^|[\s'"])(?:ma\s+(?:fille|m[èe]re|s[œo]ur|femme|tante|cousine|ni[èe]ce|grand-m[èe]re|belle-m[èe]re|belle-s[œo]ur|belle-fille)|mon\s+(?:fils|p[èe]re|fr[èe]re|mari|oncle|cousin|neveu|grand-p[èe]re|beau-p[èe]re|beau-fr[èe]re|beau-fils)|mes\s+(?:parents|enfants)|notre\s+enfant)(?:\s|$)/i,
+      sensitiveIndicators:
+        /(?:cancer|diab[èe]te|d[ée]pression|VIH|handicap|salaire|revenu|dettes?|surendettement|divorce|casier\s+judiciaire|condamn[ée]|prison|tribunal|avocat|grossesse|adoption|ALD|invalidit[ée])/i,
+      severity: "high",
+      category: "Donnée familiale sensible",
+    },
   ];
 
   // Browser (Chrome MAIN world)
