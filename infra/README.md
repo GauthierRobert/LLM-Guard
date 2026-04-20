@@ -1,8 +1,8 @@
 # LLM Guard — Infrastructure
 
 Self-hosted single-node deployment: Postgres + TimescaleDB, Keycloak (OIDC),
-FastAPI ingest/query API, Angular 21 SSR dashboard, Caddy reverse proxy with
-automatic TLS.
+Java (Spring Boot) ingest/query API, Angular 21 SSR dashboard, Caddy reverse
+proxy with automatic TLS.
 
 ## Quickstart
 
@@ -27,7 +27,7 @@ docker compose up -d
 |------------|------|------|
 | postgres   | —    | TimescaleDB hypertable for events |
 | keycloak   | 8080 | OIDC for SOC user login |
-| api        | 8000 | FastAPI ingest + query |
+| api        | 8000 | Java (Spring Boot) ingest + query |
 | dashboard  | 4000 | Angular 21 SSR |
 | caddy      | 80/443 | Reverse proxy + TLS |
 

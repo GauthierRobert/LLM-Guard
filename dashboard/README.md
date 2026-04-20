@@ -11,8 +11,8 @@ npm start                 # ng serve on http://localhost:4200
 ```
 
 Set `localStorage.lg_token` to a Keycloak access token to authenticate against
-the API. The dev proxy forwards `/api` to `http://localhost:8000` (the FastAPI
-service from `../api`). Configure proxy in `proxy.conf.json` if needed.
+the API. The dev proxy forwards `/api` to `http://localhost:8000` (the Java
+service from `../api-java`). Configure proxy in `proxy.conf.json` if needed.
 
 ## Routes
 

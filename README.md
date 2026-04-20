@@ -66,7 +66,7 @@ Pour les équipes sécurité qui veulent une vue de flotte, le projet inclut un 
 2. Créer un jeton d'appareil côté dashboard, le coller dans `chrome-extension://.../options.html`
 3. Cocher *"Activer l'envoi des métadonnées"* — seules les métadonnées et les aperçus anonymisés (`[EMAIL_1]`, `[PHONE_2]`…) quittent le navigateur
 
-Voir `infra/README.md`, `api/README.md`, `dashboard/README.md`.
+Voir `infra/README.md`, `api-java/README.md`, `dashboard/README.md`.
 
 ## Modes de protection
 

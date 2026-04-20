@@ -91,7 +91,7 @@ Angular 21 dashboard (dashboard/) ──── /v1/stats, /v1/events, WS /v1/liv
 
 ### Backend & dashboard
 
-See `api/README.md` and `dashboard/README.md` for dev and deployment. Single-node prod via `infra/docker-compose.yml` (Postgres + Timescale, Keycloak, FastAPI, Angular SSR, Caddy TLS).
+See `api-java/README.md` and `dashboard/README.md` for dev and deployment. Single-node prod via `infra/docker-compose.yml` (Postgres + Timescale, Keycloak, Java API, Angular SSR, Caddy TLS).
 
 ## Installing the Extension
 
