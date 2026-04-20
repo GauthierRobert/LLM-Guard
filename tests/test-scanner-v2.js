@@ -11,8 +11,11 @@ function scanForPII(text) {
   const findings = [];
   for (const p of PII_PATTERNS) {
     const regex = new RegExp(p.regex.source, p.regex.flags);
-    const matches = text.match(regex);
-    if (matches) findings.push({ type: p.name, severity: p.severity, count: matches.length, samples: matches.slice(0, 3) });
+    const raw = text.match(regex);
+    if (!raw) continue;
+    const matches = typeof p.validate === "function" ? raw.filter((m) => p.validate(m)) : raw;
+    if (matches.length === 0) continue;
+    findings.push({ type: p.name, severity: p.severity, count: matches.length, samples: matches.slice(0, 3) });
   }
   const lower = text.toLowerCase();
   const kws = SENSITIVE_KEYWORDS.filter(k => lower.includes(k.toLowerCase()));
@@ -32,6 +35,7 @@ function anonymizeText(text) {
     while ((match = regex.exec(result)) !== null) {
       const original = match[0];
       if (reverse.has(original)) continue;
+      if (typeof p.validate === "function" && !p.validate(original)) continue;
       counter++;
       const ph = p.placeholder.replace("§", counter);
       map.set(ph, original);
@@ -80,7 +84,7 @@ test("UK", () => assertDetects("+44 7911 123456", "Téléphone international"));
 
 console.log("\n\x1b[1m🏦 IBAN / CB / NSS\x1b[0m");
 test("IBAN FR", () => assertDetects("FR76 3000 6000 0112 3456 789", "IBAN"));
-test("CB espaces", () => assertDetects("4970 1234 5678 9012", "Carte bancaire"));
+test("CB espaces (Luhn valide)", () => assertDetects("4111 1111 1111 1111", "Carte bancaire"));
 test("NSS", () => assertDetects("1 85 05 78 006 084 36", "Numéro SS"));
 
 console.log("\n\x1b[1m🔑 Mots de passe\x1b[0m");
@@ -177,6 +181,87 @@ test("Dé-anonymise une réponse LLM contenant des placeholders", () => {
   const restored = deanonymizeText(llmResponse, mappings);
   assert(restored.includes("jean@test.fr"), "Le placeholder doit être remplacé dans la réponse");
 });
+
+// ─── Tests validateurs (NOUVEAU) ───────────────────────────────
+// Each pattern may ship a `validate(match)` hook that drops matches the
+// regex can't distinguish from the real thing — invalid Luhn cards, out-of-
+// range IP octets, reserved example domains, too-short JWTs.
+
+console.log("\n\x1b[1m🧪 Validateurs — faux positifs éliminés\x1b[0m");
+
+test("CB Luhn invalide ignorée", () => {
+  const f = scanForPII("Facture #1234 5678 9012 3456 à payer");
+  assert(!f.some((x) => x.type === "Carte bancaire"), "CB non-Luhn ne doit PAS être détectée");
+});
+
+test("CB Luhn valide détectée", () => assertDetects("4242 4242 4242 4242", "Carte bancaire"));
+
+test("Email sur example.com ignoré (RFC 2606)", () => {
+  const f = scanForPII("Écris à test@example.com pour info");
+  assert(!f.some((x) => x.type === "Email"), "email reserved-domain ne doit PAS être détecté");
+});
+
+test("Email sur TLD .test ignoré", () => {
+  const f = scanForPII("support@site.test dit...");
+  assert(!f.some((x) => x.type === "Email"), "email .test ne doit PAS être détecté");
+});
+
+test("Email corporate détecté", () => assertDetects("alice@acme.com", "Email"));
+
+test("IP valide détectée", () => assertDetects("Serveur à 192.168.1.42", "Adresse IP"));
+
+test("IP invalide (octets >255) ignorée", () => {
+  const f = scanForPII("Ping 999.999.999.999 timeout");
+  assert(!f.some((x) => x.type === "Adresse IP"), "octets >255 ne doivent PAS matcher");
+});
+
+test("IP avec zero leading ignorée (version string)", () => {
+  const f = scanForPII("Version 01.02.03.04 released");
+  assert(!f.some((x) => x.type === "Adresse IP"), "leading-zero octet ne doit PAS matcher");
+});
+
+test("JWT trop court ignoré", () => {
+  const f = scanForPII("Fake: eyJa.eyJb.eyJc done");
+  assert(!f.some((x) => x.type === "JWT"), "pseudo-JWT court ne doit PAS matcher");
+});
+
+test("JWT réaliste détecté", () => {
+  const realJwt = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJzdWIiOiIxMjM0NTY3ODkwIiwibmFtZSI6IkpvaG4gRG9lIiwiaWF0IjoxNTE2MjM5MDIyfQ.SflKxwRJSMeKKF2QT4fwpMeJf36POk6yJV_adQssw5c";
+  assertDetects(`Bearer ${realJwt}`, "JWT");
+});
+
+test("JWT sans en-tête alg ignoré", () => {
+  // Header décodé = {"foo":"bar"} → absence de "alg" → rejeté par le validateur
+  const fake = "eyJmb28iOiJiYXIifQ.eyJzdWIiOiIxMjM0NTY3ODkwIiwibmFtZSI6IkpvaG4gRG9lIiwiaWF0IjoxNTE2MjM5MDIyfQ.SflKxwRJSMeKKF2QT4fwpMeJf36POk6yJV_adQssw5c";
+  const f = scanForPII(`Bearer ${fake}`);
+  assert(!f.some((x) => x.type === "JWT"), "JWT sans alg ne doit PAS matcher");
+});
+
+// ─── Tests nouveaux patterns (crypto + Azure + EU) ─────────────
+
+console.log("\n\x1b[1m🪙 Nouveaux patterns — wallets crypto & identifiants EU\x1b[0m");
+
+test("Ethereum address détectée", () => assertDetects("Wallet: 0xdAC17F958D2ee523a2206206994597C13D831ec7", "Ethereum"));
+
+test("Bitcoin bech32 détecté", () => assertDetects("Send to bc1qxy2kgdygjrsqtzq2n0yrf2493p83kkfjhx0wlh", "Bitcoin (bech32)"));
+
+test("Bitcoin legacy détecté", () => assertDetects("Pay 1A1zP1eP5QGefi2DMPTfTL5SLmv7DivfNa now", "Bitcoin (legacy)"));
+
+test("Azure connection string détectée", () => {
+  const s = "DefaultEndpointsProtocol=https;AccountName=mystore;AccountKey=abc123def456";
+  assertDetects(s, "Azure connection string");
+});
+
+test("SIREN Luhn-valide détecté", () => assertDetects("SIREN 732829320 (Air France)", "SIREN"));
+
+test("SIREN non-Luhn ignoré", () => {
+  const f = scanForPII("Ticket numéro 123456789 fermé");
+  assert(!f.some((x) => x.type === "SIREN"), "SIREN non-Luhn ne doit PAS matcher");
+});
+
+test("SIRET Luhn-valide détecté", () => assertDetects("SIRET 35600000000048", "SIRET"));
+
+test("Numéro TVA UE détecté", () => assertDetects("VAT FR40303265045 invoice", "Numéro TVA UE"));
 
 // ─── Résumé ────────────────────────────────────────────────────
 console.log("\n" + "═".repeat(50));

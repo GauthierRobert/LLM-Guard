@@ -41,16 +41,19 @@ function scanRegex(text) {
   const findings = [];
   for (const p of PII_PATTERNS) {
     const regex = new RegExp(p.regex.source, p.regex.flags);
-    const matches = text.match(regex);
-    if (matches) {
-      findings.push({
-        layer: "regex",
-        type: p.name,
-        severity: p.severity,
-        count: matches.length,
-        matches: [...new Set(matches)],
-      });
-    }
+    const raw = text.match(regex);
+    if (!raw) continue;
+    const filtered = typeof p.validate === "function"
+      ? raw.filter((m) => p.validate(m))
+      : raw;
+    if (filtered.length === 0) continue;
+    findings.push({
+      layer: "regex",
+      type: p.name,
+      severity: p.severity,
+      count: filtered.length,
+      matches: [...new Set(filtered)],
+    });
   }
   return findings;
 }
@@ -92,7 +95,7 @@ function scanFuzzy(text) {
         if (normalizedWord.length < normalizedKw.length - 2) continue;
         if (normalizedWord.length > normalizedKw.length + 2) continue;
 
-        const distance = levenshtein(normalizedWord, normalizedKw);
+        const distance = levenshtein(normalizedWord, normalizedKw, threshold);
         if (distance > 0 && distance <= threshold) {
           findings.push({
             layer: "fuzzy",
@@ -117,7 +120,7 @@ function scanFuzzy(text) {
         words.some((tw) => {
           const nw = normalize(tw);
           const nkw = normalize(w);
-          return nw === nkw || (nkw.length >= 4 && levenshtein(nw, nkw) <= 1);
+          return nw === nkw || (nkw.length >= 4 && levenshtein(nw, nkw, 1) <= 1);
         })
       );
       if (allPresent && !normalizedText.includes(normalizedKw)) {
@@ -126,7 +129,7 @@ function scanFuzzy(text) {
           const nw = normalize(w);
           return words.findIndex((tw) => {
             const ntw = normalize(tw);
-            return ntw === nw || (nw.length >= 4 && levenshtein(ntw, nw) <= 1);
+            return ntw === nw || (nw.length >= 4 && levenshtein(ntw, nw, 1) <= 1);
           });
         });
         const minPos = Math.min(...positions);
@@ -165,7 +168,7 @@ function detectObfuscation(text) {
       const collapsed = normalize(match);
       for (const kw of SENSITIVE_KEYWORDS) {
         const nkw = normalize(kw.term);
-        if (collapsed === nkw || levenshtein(collapsed, nkw) <= 1) {
+        if (collapsed === nkw || levenshtein(collapsed, nkw, 1) <= 1) {
           findings.push({
             layer: "fuzzy",
             type: `Obfuscation détectée: ${kw.term}`,
@@ -188,7 +191,7 @@ function detectObfuscation(text) {
       const collapsed = normalize(match);
       for (const kw of SENSITIVE_KEYWORDS) {
         const nkw = normalize(kw.term);
-        if (collapsed === nkw || levenshtein(collapsed, nkw) <= 1) {
+        if (collapsed === nkw || levenshtein(collapsed, nkw, 1) <= 1) {
           findings.push({
             layer: "fuzzy",
             type: `Leetspeak détecté: ${kw.term}`,

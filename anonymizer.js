@@ -89,6 +89,11 @@ function createAnonymizer({
       while ((match = regex.exec(result)) !== null) {
         const original = match[0];
         if (isAllowlisted(original, pattern.name)) continue;
+        // Honour the pattern-level validator so anonymisation doesn't mint a
+        // placeholder for a match that the detector would have discarded
+        // (invalid Luhn card, reserved example.com email, 999.999.999.999
+        // IP, etc.).
+        if (typeof pattern.validate === "function" && !pattern.validate(original)) continue;
 
         let placeholder = reverseMap.get(original);
         if (!placeholder) {
