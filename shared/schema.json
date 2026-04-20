@@ -1,0 +1,130 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://llm-guard.example.com/schemas/event-v1.json",
+  "title": "LLMGuardEvent",
+  "description": "A single PII-detection event uploaded by the LLM Guard Chrome extension to the central dashboard. Metadata + anonymized preview only — raw prompt text and masked samples are stripped client-side before upload.",
+  "type": "object",
+  "required": [
+    "eventId",
+    "deviceId",
+    "orgId",
+    "timestamp",
+    "hostname",
+    "llm",
+    "action",
+    "mode",
+    "promptLength",
+    "mappingsCount",
+    "findings",
+    "extensionVersion",
+    "schemaVersion"
+  ],
+  "additionalProperties": false,
+  "properties": {
+    "eventId": {
+      "type": "string",
+      "format": "uuid",
+      "description": "Client-generated UUID, used as idempotency key on the server."
+    },
+    "deviceId": {
+      "type": "string",
+      "format": "uuid",
+      "description": "Persistent per-install device identifier."
+    },
+    "orgId": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 64,
+      "pattern": "^[a-zA-Z0-9_-]+$",
+      "description": "Static organization identifier in single-tenant build."
+    },
+    "userHint": {
+      "type": ["string", "null"],
+      "maxLength": 254,
+      "description": "Optional user email/identifier set via the options page. Never populated automatically."
+    },
+    "timestamp": {
+      "type": "string",
+      "format": "date-time",
+      "description": "ISO 8601 timestamp of the event."
+    },
+    "hostname": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 253,
+      "description": "URL hostname (path and query are stripped before upload)."
+    },
+    "llm": {
+      "type": "string",
+      "enum": ["ChatGPT", "Claude", "Gemini", "Copilot", "Unknown"],
+      "description": "LLM service identifier from LLM_PROFILES."
+    },
+    "action": {
+      "type": "string",
+      "enum": ["CLEAN", "ANONYMIZED", "PII_DETECTED", "BLOCKED"],
+      "description": "Action taken by the extension."
+    },
+    "endpoint": {
+      "type": ["string", "null"],
+      "maxLength": 512,
+      "description": "LLM API endpoint path (e.g. /api/conversation)."
+    },
+    "mode": {
+      "type": "string",
+      "enum": ["anonymize", "block"],
+      "description": "Active CONFIG.mode at the time of the event."
+    },
+    "promptLength": {
+      "type": "integer",
+      "minimum": 0,
+      "description": "Character count of the original prompt."
+    },
+    "mappingsCount": {
+      "type": "integer",
+      "minimum": 0,
+      "description": "Number of PII placeholders created during anonymization."
+    },
+    "anonymizedPreview": {
+      "type": ["string", "null"],
+      "maxLength": 200,
+      "description": "First 100 chars of the anonymized prompt (contains only placeholders like [EMAIL_1])."
+    },
+    "findings": {
+      "type": "array",
+      "maxItems": 50,
+      "items": { "$ref": "#/$defs/Finding" }
+    },
+    "extensionVersion": {
+      "type": "string",
+      "pattern": "^\\d+\\.\\d+\\.\\d+$",
+      "description": "Extension version from manifest.json."
+    },
+    "schemaVersion": {
+      "type": "integer",
+      "const": 1
+    }
+  },
+  "$defs": {
+    "Finding": {
+      "type": "object",
+      "required": ["type", "severity", "count"],
+      "additionalProperties": false,
+      "properties": {
+        "type": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 128,
+          "description": "Finding label (e.g. 'Email', 'Mot-clé: salaire', 'Blacklist: Project X')."
+        },
+        "severity": {
+          "type": "string",
+          "enum": ["critical", "high", "medium", "low"]
+        },
+        "count": {
+          "type": "integer",
+          "minimum": 1
+        }
+      }
+    }
+  }
+}

@@ -69,10 +69,21 @@
 
   .empty-state { text-align: center; padding: 20px; color: #5f5e5a; font-size: 12px; }
 
-  .footer { padding: 10px 16px; display: flex; justify-content: space-between; align-items: center; }
+  .footer { padding: 10px 16px; display: flex; justify-content: space-between; align-items: center; flex-wrap: wrap; gap: 6px; }
   .btn { background: none; border: 1px solid #2a2b30; color: #888780; padding: 5px 10px; border-radius: 5px; cursor: pointer; font-size: 11px; transition: all 0.2s; }
   .btn:hover { border-color: #5f5e5a; color: #d1d0c7; }
   .btn.danger:hover { border-color: #A32D2D; color: #F09595; }
+  .btn.primary { border-color: #0F6E56; color: #9fe1cb; }
+  .btn.primary:hover { border-color: #14856a; color: #e1f5ee; background: rgba(15,110,86,0.1); }
+
+  .sync-row { display: flex; align-items: center; gap: 8px; padding: 8px 0; font-size: 11px; }
+  .sync-dot { width: 8px; height: 8px; border-radius: 50%; flex-shrink: 0; }
+  .sync-dot.off { background: #5f5e5a; }
+  .sync-dot.ok { background: #5DCAA5; }
+  .sync-dot.err { background: #E24B4A; }
+  .sync-dot.pending { background: #EF9F27; }
+  .sync-text { flex: 1; color: #b4b2a9; }
+  .sync-meta { color: #5f5e5a; font-size: 10px; font-variant-numeric: tabular-nums; }
 </style>
 </head>
 <body>
@@ -120,6 +131,19 @@
 <div class="section" id="pii-section" style="display:none">
   <div class="section-title">Détections par type</div>
   <div id="pii-bars"></div>
+</div>
+
+<div class="section">
+  <div class="section-title">Tableau de bord centralisé</div>
+  <div class="sync-row">
+    <div class="sync-dot off" id="sync-dot"></div>
+    <div class="sync-text" id="sync-text">Désactivé</div>
+    <div class="sync-meta" id="sync-meta"></div>
+  </div>
+  <div style="display: flex; gap: 6px; margin-top: 6px;">
+    <button class="btn primary" id="btn-dashboard" style="flex:1">Ouvrir le dashboard ↗</button>
+    <button class="btn" id="btn-configure" style="flex:1">Configurer</button>
+  </div>
 </div>
 
 <div class="section">

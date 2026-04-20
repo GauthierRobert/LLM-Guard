@@ -1,0 +1,73 @@
+services:
+  postgres:
+    image: timescale/timescaledb:latest-pg16
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: llmguard
+      POSTGRES_PASSWORD: llmguard
+      POSTGRES_DB: llmguard
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U llmguard"]
+      interval: 5s
+      timeout: 3s
+      retries: 20
+
+  keycloak:
+    image: quay.io/keycloak/keycloak:26.0
+    restart: unless-stopped
+    command: ["start-dev", "--import-realm"]
+    environment:
+      KC_BOOTSTRAP_ADMIN_USERNAME: admin
+      KC_BOOTSTRAP_ADMIN_PASSWORD: admin
+      KC_HTTP_RELATIVE_PATH: /auth
+    volumes:
+      - ./keycloak/realm-llm-guard.json:/opt/keycloak/data/import/realm-llm-guard.json:ro
+    depends_on:
+      postgres:
+        condition: service_healthy
+
+  api:
+    build: ../api
+    restart: unless-stopped
+    environment:
+      DATABASE_URL: postgresql+asyncpg://llmguard:llmguard@postgres:5432/llmguard
+      ORG_ID: default
+      DEVICE_TOKEN_SECRET: ${DEVICE_TOKEN_SECRET:-change-me-in-prod}
+      KEYCLOAK_ISSUER: http://keycloak:8080/auth/realms/llm-guard
+      KEYCLOAK_AUDIENCE: llm-guard-dashboard
+      CORS_ORIGINS: http://localhost:4200,https://dashboard.local
+    depends_on:
+      postgres:
+        condition: service_healthy
+    command: >
+      sh -c "alembic upgrade head &&
+             uvicorn llm_guard_api.main:app --host 0.0.0.0 --port 8000"
+
+  dashboard:
+    build: ../dashboard
+    restart: unless-stopped
+    environment:
+      PORT: 4000
+    depends_on:
+      - api
+
+  caddy:
+    image: caddy:2-alpine
+    restart: unless-stopped
+    ports:
+      - "80:80"
+      - "443:443"
+    volumes:
+      - ./Caddyfile:/etc/caddy/Caddyfile:ro
+      - caddydata:/data
+      - caddyconfig:/config
+    depends_on:
+      - api
+      - dashboard
+
+volumes:
+  pgdata:
+  caddydata:
+  caddyconfig:
