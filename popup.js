@@ -1,4 +1,4 @@
-const LLM_COLORS = { ChatGPT: "#10A37F", Claude: "#D97706", Gemini: "#4285F4", Copilot: "#0078D4" };
+const LLM_COLORS = { ChatGPT: "#10A37F", Claude: "#D97706", Gemini: "#4285F4", Copilot: "#0078D4", Mistral: "#FA5018", Perplexity: "#20B8CD", DeepSeek: "#4D6BFE", Grok: "#1DA1F2" };
 
 // Allowed CSS class names for log dots and severity tags (whitelist to prevent injection)
 const VALID_DOT_CLASSES = ["block", "anon", "warn", "clean"];
@@ -256,7 +256,7 @@ function loadLogs() {
 function loadMode() {
   chrome.storage.local.get(["guard_mode"], (r) => {
     const raw = r.guard_mode || "anonymize";
-    const mode = raw === "block" ? "block" : "anonymize";
+    const mode = ["block", "visible", "anonymize"].includes(raw) ? raw : "anonymize";
     document.querySelectorAll(".mode-btn").forEach(b =>
       b.classList.toggle("active", b.dataset.mode === mode)
     );

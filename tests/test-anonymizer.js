@@ -108,6 +108,20 @@ test("unfinished placeholder at stream end is flushed verbatim", () => {
   eq(streamDeanonInChunks(a, text, 2), "Erreur: fragment [EMA");
 });
 
+console.log("\n\x1b[1m🔐 Anonymizer — visible mode idempotency\x1b[0m");
+
+test("anonymizing already-anonymized text produces no new placeholders", () => {
+  // "Visible" mode shows placeholders in the composer before sending. When the
+  // fetch interceptor runs after that, the body already contains placeholders.
+  // A second anonymize pass must be a no-op so we don't create [EMAIL_1_1] junk.
+  const a = createAnonymizer({ patterns: PII_PATTERNS });
+  const first = a.anonymize("Écrire à alice@acme.com");
+  assert(first.changed, "first pass should change the text");
+  const second = a.anonymize(first.anonymized);
+  assert(!second.changed, "second pass should not mint new placeholders");
+  eq(second.anonymized, first.anonymized);
+});
+
 console.log("\n\x1b[1m🔐 Anonymizer — overflow behavior\x1b[0m");
 
 test("onOverflow fires exactly once when map exceeds maxMapSize", () => {
