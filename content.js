@@ -112,7 +112,7 @@
     mode: "anonymize",
     bannerDuration: 8000,
     maxMapSize: 5000,
-    layer4: { enabled: false, presidioUrl: "" },
+    layer4: { enabled: false, presidioUrl: "", usePresidioAnonymizer: false },
     attachment: {
       enabled: true,
       mode: "inherit",
@@ -135,10 +135,24 @@
     /blob\.core\.windows\.net/i,
   ];
 
-  // Sync mode + layer4 config from storage via bridge
+  // Pending Presidio proxy requests: reqId → {resolve, reject, timer}
+  const presidioRequestMap = new Map();
+  let _presidioReqSeq = 0;
+
+  // Sync mode + layer4 config from storage via bridge; also handles Presidio proxy responses.
   window.addEventListener("message", (evt) => {
     if (evt.source !== window) return;
     if (evt.data?.source !== "llm-guard-bridge") return;
+
+    if (evt.data.type === "presidio.response") {
+      const prom = presidioRequestMap.get(evt.data.reqId);
+      if (!prom) return;
+      presidioRequestMap.delete(evt.data.reqId);
+      clearTimeout(prom.timer);
+      if (evt.data.error) prom.reject(new Error(evt.data.error));
+      else prom.resolve({ ok: evt.data.ok, data: evt.data.data });
+      return;
+    }
 
     if (evt.data.type === "modeUpdate") {
       const m = evt.data.mode;
@@ -164,6 +178,7 @@
       CONFIG.layer4 = {
         enabled: !!next.enabled,
         presidioUrl: next.presidioUrl || "",
+        usePresidioAnonymizer: !!next.usePresidioAnonymizer,
       };
       // Force re-init on next scan if URL changed or toggle flipped
       if (urlChanged) layer4Instance = null;
@@ -198,7 +213,50 @@
     },
   });
 
-  function anonymizeText(text) { return anonymizer.anonymize(text); }
+  // Per-session counters for Presidio NER placeholders ([PERSON_1], [ORG_2]…).
+  // Never reset so placeholders stay unique across prompts within a session.
+  const presidioEntityCounters = {};
+
+  // Apply Presidio NER to find entities the regex engine missed, then register
+  // them in the shared anonymizationMap so deanonymize() can reverse them.
+  // Operates on locallyAnonymized (already regex-cleaned) but uses spans from
+  // originalText so indices are correct.
+  async function applyPresidioAnonymizer(locallyAnonymized, originalText) {
+    const inst = await getLayer4();
+    if (!inst?.analyzeSpans) return locallyAnonymized;
+
+    const spans = await inst.analyzeSpans(originalText);
+    if (!spans.length) return locallyAnonymized;
+
+    // Longest spans first to avoid nested-replacement ordering issues
+    spans.sort((a, b) => (b.end - b.start) - (a.end - a.start));
+
+    let result = locallyAnonymized;
+    for (const span of spans) {
+      const original = originalText.slice(span.start, span.end).trim();
+      if (!original || anonymizer.reverseMap.has(original)) continue;
+
+      const type = (span.entity_type || "PII").toUpperCase();
+      presidioEntityCounters[type] = (presidioEntityCounters[type] || 0) + 1;
+      const placeholder = `[${type}_${presidioEntityCounters[type]}]`;
+
+      anonymizer.registerExternalMapping(placeholder, original);
+      result = result.split(original).join(placeholder);
+    }
+    return result;
+  }
+
+  async function anonymizeText(text) {
+    const result = anonymizer.anonymize(text);
+    if (CONFIG.layer4.enabled && CONFIG.layer4.usePresidioAnonymizer) {
+      const further = await applyPresidioAnonymizer(result.anonymized, text);
+      if (further !== result.anonymized) {
+        return { anonymized: further, mappings: result.mappings, changed: true };
+      }
+    }
+    return result;
+  }
+
   function deanonymizeText(text) { return anonymizer.deanonymize(text); }
 
   // ─── Layer 3: Contextual scanning ────────────────────────────
@@ -288,28 +346,96 @@
     return findings;
   }
 
-  // ─── Layer 4: Local NLP (Presidio) ───────────────────────────
+  // ─── Layer 4: Presidio proxy ─────────────────────────────────
+  // All HTTP calls are routed through the background service worker via
+  // bridge.js so the page's Content Security Policy cannot block them.
   let layer4Instance = null;
   let layer4InitPromise = null;
 
+  const PRESIDIO_ENTITIES = [
+    "PERSON", "PHONE_NUMBER", "EMAIL_ADDRESS", "IBAN_CODE", "CREDIT_CARD",
+    "LOCATION", "NRP", "MEDICAL_LICENSE", "ORGANIZATION", "DATE_TIME", "IP_ADDRESS",
+  ];
+
+  function presidioFetch(url, body, method) {
+    const reqId = `pres-${++_presidioReqSeq}`;
+    return new Promise((resolve, reject) => {
+      const timer = setTimeout(() => {
+        presidioRequestMap.delete(reqId);
+        reject(new Error("Presidio proxy timeout"));
+      }, 5000);
+      presidioRequestMap.set(reqId, { resolve, reject, timer });
+      window.postMessage(
+        { source: "llm-guard", type: "presidio.fetch", reqId, url, body: body || null, method: method || "GET" },
+        window.location.origin
+      );
+    });
+  }
+
+  function mapPresidioType(t) {
+    return { PERSON: "Nom de personne", PHONE_NUMBER: "Téléphone", EMAIL_ADDRESS: "Email",
+      IBAN_CODE: "IBAN", CREDIT_CARD: "Carte bancaire", LOCATION: "Lieu",
+      NRP: "Nationalité/Religion/Politique", ORGANIZATION: "Organisation",
+      DATE_TIME: "Date", IP_ADDRESS: "Adresse IP" }[t] || t;
+  }
+
+  function mapPresidioSeverity(t) {
+    return { PERSON: "high", PHONE_NUMBER: "high", EMAIL_ADDRESS: "high",
+      IBAN_CODE: "critical", CREDIT_CARD: "critical", LOCATION: "medium",
+      NRP: "high", ORGANIZATION: "medium", DATE_TIME: "low", IP_ADDRESS: "low" }[t] || "medium";
+  }
+
+  function createPresidioProxy(analyzerUrl) {
+    let _ready = false;
+    return {
+      get ready() { return _ready; },
+      async init() {
+        try {
+          const { ok } = await presidioFetch(`${analyzerUrl}/health`);
+          _ready = ok;
+          if (_ready) console.log("[LLM Guard] Presidio connecté (proxy background)");
+          else console.warn("[LLM Guard] Presidio non accessible");
+        } catch {
+          _ready = false;
+          console.warn("[LLM Guard] Presidio non accessible");
+        }
+      },
+      async classify(text) {
+        if (!_ready) return [];
+        try {
+          const { ok, data } = await presidioFetch(`${analyzerUrl}/analyze`,
+            { text, language: "fr", entities: PRESIDIO_ENTITIES, score_threshold: 0.6 }, "POST");
+          if (!ok || !Array.isArray(data)) return [];
+          return data.map(r => ({
+            layer: "presidio", type: mapPresidioType(r.entity_type),
+            severity: mapPresidioSeverity(r.entity_type), confidence: r.score,
+            matches: [text.slice(r.start, r.end)], start: r.start, end: r.end,
+          }));
+        } catch { return []; }
+      },
+      async analyzeSpans(text) {
+        if (!_ready) return [];
+        try {
+          const { ok, data } = await presidioFetch(`${analyzerUrl}/analyze`,
+            { text, language: "fr", entities: PRESIDIO_ENTITIES, score_threshold: 0.6 }, "POST");
+          return (ok && Array.isArray(data)) ? data : [];
+        } catch { return []; }
+      },
+    };
+  }
+
   async function getLayer4() {
     if (!CONFIG.layer4.enabled || !CONFIG.layer4.presidioUrl) return null;
-    if (layer4Instance?.activeClassifier) return layer4Instance;
+    if (layer4Instance?.ready) return layer4Instance;
     if (layer4InitPromise) return layer4InitPromise;
-    const factory = window.__llmGuard?.layer4?.Layer4Classifier;
-    if (!factory) return null;
-    // Always clear layer4InitPromise when the init attempt settles — on
-    // failure as well — otherwise a single transient Presidio outage would
-    // keep returning the rejected promise for the rest of the session.
+    // Always clear layer4InitPromise on settle so a transient Presidio outage
+    // doesn't permanently block re-init on the next scan.
     layer4InitPromise = (async () => {
       try {
-        const inst = new factory({
-          presidioUrl: CONFIG.layer4.presidioUrl,
-          enableBrowserNLP: false,
-        });
-        await inst.init();
-        layer4Instance = inst;
-        return inst.activeClassifier ? inst : null;
+        const proxy = createPresidioProxy(CONFIG.layer4.presidioUrl);
+        await proxy.init();
+        layer4Instance = proxy.ready ? proxy : null;
+        return layer4Instance;
       } finally {
         layer4InitPromise = null;
       }
@@ -327,9 +453,7 @@
         const sample = (r.matches && r.matches[0]) || "";
         if (sample && isAllowlisted(sample, r.type)) continue;
         findings.push({
-          type: r.type,
-          severity: r.severity || "medium",
-          count: 1,
+          type: r.type, severity: r.severity || "medium", count: 1,
           samples: r.matches ? r.matches.map(maskPII) : [],
           layer: r.layer || "layer4",
         });
@@ -543,7 +667,7 @@
         reason: scan.reason,
         extractedChars: (scan.text || "").length,
         findings,
-        anonymizedText: scan.text ? anonymizeText(scan.text).anonymized : "",
+        anonymizedText: scan.text ? (await anonymizeText(scan.text)).anonymized : "",
       };
     })();
 
@@ -758,7 +882,7 @@
     // how the response is rendered (see wrapResponseForDeanonymization and
     // the "visible" gate below).
     if (CONFIG.mode === "anonymize" || CONFIG.mode === "visible") {
-      const { anonymized, mappings, changed } = anonymizeText(promptText);
+      const { anonymized, mappings, changed } = await anonymizeText(promptText);
 
       if (changed) {
         const newBody = injectAnonymized(bodyText, anonymized, ACTIVE_LLM.adapter);

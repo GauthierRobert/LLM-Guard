@@ -201,6 +201,37 @@ class PresidioClassifier {
     }
   }
 
+  // Raw analysis results — returns [{entity_type, start, end, score}].
+  // Used by the extension to build its own placeholder mappings for reversible
+  // de-anonymization without calling the Presidio anonymizer service.
+  async analyzeSpans(text) {
+    if (!this.ready) {
+      await this.init();
+      if (!this.ready) return [];
+    }
+    try {
+      const response = await fetch(`${this.analyzerUrl}/analyze`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          text,
+          language: "fr",
+          entities: [
+            "PERSON", "PHONE_NUMBER", "EMAIL_ADDRESS", "IBAN_CODE",
+            "CREDIT_CARD", "LOCATION", "NRP", "MEDICAL_LICENSE",
+            "ORGANIZATION", "DATE_TIME", "IP_ADDRESS",
+          ],
+          score_threshold: 0.6,
+        }),
+      });
+      if (!response.ok) return [];
+      return await response.json();
+    } catch (err) {
+      console.warn("[LLM Guard] Presidio analyzeSpans error:", err.message);
+      return [];
+    }
+  }
+
   // Anonymiser via Presidio (le service s'en charge)
   async anonymize(text) {
     try {

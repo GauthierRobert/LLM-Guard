@@ -9,14 +9,14 @@
 :80 {
   encode zstd gzip
 
-  # API + WebSockets live stream
-  reverse_proxy /api/* api:8000 {
-    transport http {
-      versions 1.1 2
+  # API + WebSockets live stream (strip /api prefix before forwarding)
+  handle_path /api/* {
+    reverse_proxy api:8000 {
+      transport http {
+        versions 1.1 2
+      }
     }
   }
-  @live path /api/v1/live
-  reverse_proxy @live api:8000
 
   # Keycloak
   reverse_proxy /auth/* keycloak:8080

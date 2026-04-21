@@ -1,4 +1,4 @@
-import { HttpErrorResponse, HttpInterceptorFn } from '@angular/common/http';
+import { HttpErrorResponse, HttpEvent, HttpInterceptorFn } from '@angular/common/http';
 import { inject } from '@angular/core';
 import { Observable, catchError, throwError } from 'rxjs';
 
@@ -16,14 +16,14 @@ import { ErrorBusService } from './error-bus.service';
  * The previous version silently dropped these — users saw a blank dashboard
  * whenever Keycloak expired or the API returned 500.
  */
-export const errorInterceptor: HttpInterceptorFn = (req, next): Observable<unknown> => {
+export const errorInterceptor: HttpInterceptorFn = (req, next): Observable<HttpEvent<unknown>> => {
   const bus = inject(ErrorBusService);
   return next(req).pipe(
     catchError((err: unknown) => {
       bus.push(formatError(req.url, err));
       return throwError(() => err);
     }),
-  ) as Observable<unknown>;
+  );
 };
 
 function formatError(url: string, err: unknown): string {

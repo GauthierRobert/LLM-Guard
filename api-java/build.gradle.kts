@@ -32,8 +32,8 @@ dependencies {
     implementation("org.flywaydb:flyway-database-postgresql")
     implementation("org.postgresql:postgresql")
 
-    // JSONB mapping for Hibernate 7
-    implementation("io.hypersistence:hypersistence-utils-hibernate-63:3.9.0")
+    // Jackson JSR-310 (Java Time) — explicit in Spring Boot 4 starters
+    implementation("com.fasterxml.jackson.datatype:jackson-datatype-jsr310")
 
     testImplementation("org.springframework.boot:spring-boot-starter-test")
     testImplementation("org.springframework.security:spring-security-test")

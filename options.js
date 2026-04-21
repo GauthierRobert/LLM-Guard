@@ -77,6 +77,7 @@ async function saveConfig() {
     guard_layer4: {
       enabled: $("opt-layer4-enabled").checked,
       presidioUrl: layer4Url,
+      usePresidioAnonymizer: $("opt-layer4-use-anonymizer").checked,
     },
   });
 
@@ -112,9 +113,10 @@ async function loadAttachmentConfig() {
 
 async function loadLayer4Config() {
   const { guard_layer4 } = await chrome.storage.local.get(["guard_layer4"]);
-  const cfg = guard_layer4 || { enabled: false, presidioUrl: "" };
+  const cfg = guard_layer4 || { enabled: false, presidioUrl: "", usePresidioAnonymizer: false };
   $("opt-layer4-enabled").checked = !!cfg.enabled;
   $("opt-layer4-presidio-url").value = cfg.presidioUrl || "";
+  $("opt-layer4-use-anonymizer").checked = !!cfg.usePresidioAnonymizer;
 }
 
 async function testLayer4() {

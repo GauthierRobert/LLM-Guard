@@ -139,6 +139,44 @@ async function run() {
     eq(findings.length, 0);
   });
 
+  console.log("\n\x1b[1m🧠 Layer 4 — PresidioClassifier.analyzeSpans\x1b[0m");
+
+  await test("analyzeSpans() returns raw spans when ready", async () => {
+    global.fetch = mockFetch({
+      "/health": () => jsonResponse({ status: "ok" }),
+      "/analyze": () => jsonResponse([
+        { entity_type: "PERSON", start: 8, end: 20, score: 0.92 },
+        { entity_type: "LOCATION", start: 25, end: 30, score: 0.75 },
+      ]),
+    });
+    const p = new PresidioClassifier("http://fake.presidio:5001");
+    await p.init();
+    const spans = await p.analyzeSpans("Bonjour Marie Dubois vit à Paris.");
+    eq(spans.length, 2);
+    eq(spans[0].entity_type, "PERSON");
+    eq(spans[0].start, 8);
+    eq(spans[0].end, 20);
+    eq(spans[1].entity_type, "LOCATION");
+  });
+
+  await test("analyzeSpans() returns [] when not ready", async () => {
+    global.fetch = async () => { throw new Error("ECONNREFUSED"); };
+    const p = new PresidioClassifier("http://nope:5001");
+    const spans = await p.analyzeSpans("test");
+    eq(spans.length, 0);
+  });
+
+  await test("analyzeSpans() returns [] on non-ok response", async () => {
+    global.fetch = mockFetch({
+      "/health": () => jsonResponse({ status: "ok" }),
+      "/analyze": () => jsonResponse({ error: "bad request" }, 400),
+    });
+    const p = new PresidioClassifier("http://fake.presidio:5001");
+    await p.init();
+    const spans = await p.analyzeSpans("test");
+    eq(spans.length, 0);
+  });
+
   // Wait for all tests to finish before reporting
   console.log(`\n\x1b[1m${passed}/${total} tests passed\x1b[0m`);
   if (failed > 0) process.exit(1);

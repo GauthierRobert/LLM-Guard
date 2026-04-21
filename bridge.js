@@ -72,6 +72,25 @@ window.addEventListener("message", (event) => {
     return;
   }
 
+  if (event.data.type === "presidio.fetch") {
+    // Proxy Presidio HTTP through the background service worker to bypass the
+    // host page's Content Security Policy. Validate URL before forwarding.
+    const { reqId, url, body, method } = event.data;
+    if (typeof reqId !== "string" || typeof url !== "string") return;
+    if (!/^https?:\/\//i.test(url)) return;
+    chrome.runtime.sendMessage(
+      { source: "llm-guard", type: "presidio.fetch", reqId, url, body: body || null, method: method || "GET" },
+      (result) => {
+        const r = result || { error: "no response from background" };
+        window.postMessage(
+          { source: "llm-guard-bridge", type: "presidio.response", reqId, ok: !!r.ok, data: r.data || null, error: r.error || null },
+          window.location.origin
+        );
+      }
+    );
+    return;
+  }
+
   if (event.data.type === "allowlist.addAttachment") {
     // Strict validation: sha256 must be 64-char hex; filename trimmed to a
     // safe length. Forged requests with arbitrary strings are rejected so a

@@ -5,10 +5,7 @@ RUN npm install --no-audit --no-fund
 COPY . .
 RUN npx ng build --configuration production
 
-FROM node:22-alpine
-WORKDIR /app
-COPY --from=build /app/dist /app/dist
-COPY --from=build /app/node_modules /app/node_modules
-COPY --from=build /app/package.json /app/package.json
+FROM caddy:2-alpine
+COPY --from=build /app/dist/dashboard/browser /srv
+RUN printf ':4000 {\n  root * /srv\n  encode zstd gzip\n  try_files {path} /index.html\n  file_server\n}\n' > /etc/caddy/Caddyfile
 EXPOSE 4000
-CMD ["node", "dist/dashboard/server/server.mjs"]

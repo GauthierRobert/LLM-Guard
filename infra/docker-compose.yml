@@ -44,7 +44,7 @@ services:
       postgres:
         condition: service_healthy
     healthcheck:
-      test: ["CMD-SHELL", "wget -qO- http://localhost:8000/v1/health >/dev/null || exit 1"]
+      test: ["CMD-SHELL", "curl -fsS http://localhost:8000/v1/health >/dev/null || exit 1"]
       interval: 10s
       timeout: 3s
       retries: 20
@@ -72,6 +72,18 @@ services:
     depends_on:
       - api
       - dashboard
+
+  presidio-analyzer:
+    image: mcr.microsoft.com/presidio-analyzer
+    restart: unless-stopped
+    ports:
+      - "5001:3000"
+
+  presidio-anonymizer:
+    image: mcr.microsoft.com/presidio-anonymizer
+    restart: unless-stopped
+    ports:
+      - "5002:3000"
 
 volumes:
   pgdata:

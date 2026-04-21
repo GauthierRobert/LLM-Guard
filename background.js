@@ -75,6 +75,28 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
     return true;
   }
 
+  if (message.type === "presidio.fetch") {
+    // Security: only allow fetches to the URL the user explicitly configured.
+    // This prevents a compromised page from using the proxy to reach arbitrary hosts.
+    chrome.storage.local.get(["guard_layer4"], async (r) => {
+      const presidioBase = (r.guard_layer4?.presidioUrl || "").replace(/\/+$/, "");
+      if (!presidioBase || !message.url.startsWith(presidioBase)) {
+        sendResponse({ error: "URL not allowed" });
+        return;
+      }
+      try {
+        const opts = { method: message.method || "GET", headers: { "Content-Type": "application/json" } };
+        if (message.body) opts.body = JSON.stringify(message.body);
+        const resp = await fetch(message.url, opts);
+        const data = resp.ok ? await resp.json() : null;
+        sendResponse({ ok: resp.ok, status: resp.status, data });
+      } catch (err) {
+        sendResponse({ error: err?.message || String(err) });
+      }
+    });
+    return true;
+  }
+
   if (message.type === "telemetry.regenerateDeviceId") {
     self.telemetry.setConfig({ deviceId: crypto.randomUUID() }).then(sendResponse);
     return true;

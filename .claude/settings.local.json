@@ -1,7 +1,37 @@
 {
   "permissions": {
     "allow": [
-      "Bash(node:*)"
+      "Bash(node:*)",
+      "Bash(docker --version)",
+      "Bash(docker compose *)",
+      "Bash(java --version)",
+      "Bash(docker info *)",
+      "Bash(npm test *)",
+      "Bash(grep -cE \"^Total: [0-9]+.*Failed: 0$\")",
+      "Bash(echo \"---exit: $?---\")",
+      "Read(//tmp/**)",
+      "Bash(openssl rand *)",
+      "Bash(echo \"exit=$?\")",
+      "Bash(docker cp *)",
+      "Bash(docker exec *)",
+      "Bash(echo \"---exit $?---\")",
+      "Bash(curl -sS -o /dev/null -w \"api /v1/health → %{http_code}\\\\n\" http://localhost/api/v1/health)",
+      "Bash(curl -sS -o /dev/null -w \"dashboard /     → %{http_code}\\\\n\" http://localhost/)",
+      "Bash(curl -sS http://localhost/api/v1/health)",
+      "Bash(curl -sS http://localhost/api/actuator/health)",
+      "Bash(curl -sS http://localhost:8000/v1/health)",
+      "Bash(curl -sS -o /dev/null -w \"api via Caddy → %{http_code}\\\\n\" http://localhost/api/v1/health)",
+      "Bash(docker run *)",
+      "Bash(MSYS_NO_PATHCONV=1 docker run --rm infra-dashboard ls /app/dist/dashboard/)",
+      "Bash(MSYS_NO_PATHCONV=1 docker run --rm infra-dashboard ls /app/dist/dashboard/server/)",
+      "Bash(MSYS_NO_PATHCONV=1 docker run --rm infra-dashboard head -80 /app/dist/dashboard/server/server.mjs)",
+      "Bash(xargs grep *)",
+      "Bash(MSYS_NO_PATHCONV=1 docker run *)",
+      "Bash(curl -sS -o /dev/null -w \"GET  /              → %{http_code}\\\\n\" http://localhost/)",
+      "Bash(curl -sS -o /dev/null -w \"GET  /api/v1/health  → %{http_code}\\\\n\" http://localhost/api/v1/health)",
+      "Bash(curl -sS -o /dev/null -w \"POST /api/v1/events  → %{http_code}\\\\n\" -X POST http://localhost/api/v1/events -H \"Content-Type: application/json\" -d '{}')",
+      "Bash(openssl dgst *)",
+      "Bash(curl -sS -X POST http://localhost:5001/analyze -H \"Content-Type: application/json\" -d '{\"text\":\"Contact me at john.doe@example.com or +33612345678\",\"language\":\"en\"}')"
     ]
   }
 }

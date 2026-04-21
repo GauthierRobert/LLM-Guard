@@ -1,6 +1,5 @@
 package com.llmguard.api.persistence;
 
-import io.hypersistence.utils.hibernate.type.json.JsonBinaryType;
 import jakarta.persistence.Column;
 import jakarta.persistence.Entity;
 import jakarta.persistence.Id;
@@ -12,7 +11,8 @@ import java.time.OffsetDateTime;
 import java.util.List;
 import java.util.Map;
 import java.util.UUID;
-import org.hibernate.annotations.Type;
+import org.hibernate.annotations.JdbcTypeCode;
+import org.hibernate.type.SqlTypes;
 
 @Entity
 @Table(name = "events", indexes = {
@@ -65,11 +65,11 @@ public class EventEntity {
     @Column(name = "anonymized_preview", columnDefinition = "text")
     private String anonymizedPreview;
 
-    @Type(JsonBinaryType.class)
+    @JdbcTypeCode(SqlTypes.JSON)
     @Column(name = "findings", nullable = false, columnDefinition = "jsonb")
     private List<Map<String, Object>> findings;
 
-    @Type(JsonBinaryType.class)
+    @JdbcTypeCode(SqlTypes.JSON)
     @Column(name = "attachment", columnDefinition = "jsonb")
     private Map<String, Object> attachment;
 

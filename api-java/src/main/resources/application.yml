@@ -8,6 +8,9 @@ spring:
   threads:
     virtual:
       enabled: true
+  jackson:
+    deserialization:
+      fail-on-unknown-properties: true
   datasource:
     url: ${DATABASE_URL:jdbc:postgresql://postgres:5432/llmguard}
     username: ${DATABASE_USER:llmguard}

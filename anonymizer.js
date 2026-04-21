@@ -172,10 +172,22 @@ function createAnonymizer({
     };
   }
 
+  // Register a placeholder/original pair produced by an external engine
+  // (e.g. Presidio NER) so that de-anonymization and stream de-anonymization
+  // work correctly for those entries too.
+  function registerExternalMapping(placeholder, original) {
+    anonymizationMap.set(placeholder, original);
+    reverseMap.set(original, placeholder);
+    if (placeholder.length > state.maxPlaceholderLen) {
+      state.maxPlaceholderLen = placeholder.length;
+    }
+  }
+
   return {
     anonymize,
     deanonymize,
     makeStreamDeanonymizer,
+    registerExternalMapping,
     get anonymizationMap() { return anonymizationMap; },
     get reverseMap() { return reverseMap; },
     get maxPlaceholderLen() { return state.maxPlaceholderLen; },

@@ -2,18 +2,13 @@
 
 html { color-scheme: dark; }
 
-$lg-palette: mat.m3-define-palette(mat.$m3-green-palette, 70, 30, 90, 10);
-
-:root {
-  @include mat.all-component-themes((
+html {
+  @include mat.theme((
     color: (
-      primary: $lg-palette,
+      primary: mat.$green-palette,
       theme-type: dark,
     ),
-    typography: (
-      plain-family: 'Inter, system-ui, sans-serif',
-      brand-family: 'Inter, system-ui, sans-serif',
-    ),
+    typography: 'Inter, system-ui, sans-serif',
     density: 0,
   ));
 }

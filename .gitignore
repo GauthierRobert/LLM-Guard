@@ -3,3 +3,4 @@
 config/company-rules.js
 api-java/.gradle/
 api-java/build/
+infra/.env
