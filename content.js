@@ -226,15 +226,30 @@
   }
 
   // ─── Layer 2: Fuzzy keyword scanning ─────────────────────────
+  // Two-pass: first an exact-substring sweep (O(n·k) where n = text length,
+  // k = keyword count), then Levenshtein on word tokens. We skip the
+  // expensive fuzzy pass once the text exceeds FUZZY_MAX_CHARS — the exact
+  // pass still runs so we don't silently drop detections on large pastes.
+  const FUZZY_MAX_CHARS = 50_000;
+
   function scanFuzzyKeywords(text) {
     const findings = [];
     const normalizedText = normalize(text);
-    const words = text.toLowerCase().split(/\s+/);
 
     const allCategorizedKeywords = [...SENSITIVE_KEYWORDS_CATEGORIZED, ...companyConfig.blacklist];
+
+    // Pre-filter: only keywords eligible for fuzzy (single word, ≥5 chars).
+    // Doing this once avoids re-testing the predicate per-word-per-keyword.
+    const fuzzyEligible = allCategorizedKeywords
+      .filter((kw) => !kw.term.includes(" ") && kw.term.length >= 5)
+      .map((kw) => ({
+        term: kw.term,
+        normalizedKw: normalize(kw.term),
+        threshold: kw.term.length <= 6 ? 1 : 2,
+      }));
+
     for (const kw of allCategorizedKeywords) {
       const normalizedKw = normalize(kw.term);
-
       if (normalizedText.includes(normalizedKw)) {
         findings.push({
           type: `Mot-clé: ${kw.term}`,
@@ -242,24 +257,31 @@
           count: 1,
           samples: [kw.term],
         });
-        continue;
       }
+    }
 
-      if (!kw.term.includes(" ") && kw.term.length >= 5) {
-        const threshold = kw.term.length <= 6 ? 1 : 2;
-        for (const word of words) {
-          const normalizedWord = normalize(word);
-          if (Math.abs(normalizedWord.length - normalizedKw.length) > 2) continue;
-          const distance = levenshtein(normalizedWord, normalizedKw, threshold);
-          if (distance > 0 && distance <= threshold) {
-            findings.push({
-              type: `Mot-clé (approx): ${kw.term}`,
-              severity: "low",
-              count: 1,
-              samples: [word],
-            });
-            break;
-          }
+    // Skip the O(n·m) Levenshtein pass on huge payloads — the exact-match
+    // sweep above already caught direct hits, so the cost of fuzzy isn't
+    // worth 1-2s of main-thread latency on a 100KB paste.
+    if (text.length > FUZZY_MAX_CHARS || fuzzyEligible.length === 0) return findings;
+
+    const words = text.toLowerCase().split(/\s+/);
+    const matchedTerms = new Set(findings.map((f) => f.type.replace(/^Mot-clé(?: \(approx\))?: /, "")));
+
+    for (const { term, normalizedKw, threshold } of fuzzyEligible) {
+      if (matchedTerms.has(term)) continue; // already hit exact pass
+      for (const word of words) {
+        const normalizedWord = normalize(word);
+        if (Math.abs(normalizedWord.length - normalizedKw.length) > 2) continue;
+        const distance = levenshtein(normalizedWord, normalizedKw, threshold);
+        if (distance > 0 && distance <= threshold) {
+          findings.push({
+            type: `Mot-clé (approx): ${term}`,
+            severity: "low",
+            count: 1,
+            samples: [word],
+          });
+          break;
         }
       }
     }
@@ -329,25 +351,58 @@
   const cacheKey = (text) => fnv1aHex(text) + ":" + fnv1aHex(text.length + "|" + (CONFIG.layer4.enabled ? 1 : 0));
   function invalidateScanCache() { scanCache.clear(); }
 
+  // Pre-compiled Layer 1 regexes — recompiling per scan was the hot path for
+  // large prompts. Patterns are data, so the underlying RegExp objects are
+  // safe to share across calls as long as we don't rely on lastIndex state
+  // (we use text.match(), which resets it).
+  const COMPILED_PII_PATTERNS = PII_PATTERNS.map((p) => ({
+    ...p,
+    compiledRegex: new RegExp(p.regex.source, p.regex.flags),
+  }));
+
+  // Context gate for SIRET/SIREN: the underlying 9/14-digit regex with Luhn
+  // still accepts ~10% of random numbers. Only promote the match if one of
+  // the French business-ID keywords sits within 40 chars on either side.
+  // This kills the dominant false-positive class (phone numbers, order IDs,
+  // timestamps) without losing real business-ID mentions.
+  const BUSINESS_CONTEXT_REGEX = /(SIREN|SIRET|RCS|SARL|SASU?|SA\b|EURL|SNC|SCI|SCOP|TVA|immatricul|soci[ée]t[ée]|entreprise|registre du commerce|num[ée]ro d'entreprise)/i;
+  function hasBusinessContext(text, matchIndex, matchLen) {
+    const start = Math.max(0, matchIndex - 40);
+    const end = Math.min(text.length, matchIndex + matchLen + 40);
+    return BUSINESS_CONTEXT_REGEX.test(text.slice(start, end));
+  }
+
   // ─── Scanner (all layers active) ─────────────────────────────
+  // Wraps each layer in an error boundary so a single bug (e.g. a malformed
+  // company regex, an unexpected text encoding, a Presidio outage) degrades
+  // gracefully instead of silently killing the whole pipeline. If any layer
+  // throws, we log it and continue with the other layers. Callers check
+  // `scanResult.layerErrors` to warn the user when detection is partial.
   async function scanForPII(text) {
     const key = cacheKey(text);
     const cached = scanCache.get(key);
     if (cached) return cached.map((f) => ({ ...f, cached: true }));
 
     const findings = [];
+    const layerErrors = [];
 
     // Layer 1: Regex. `pattern.validate` is an optional post-match hook that
     // drops structurally-plausible but semantically invalid matches (Luhn,
     // octet bounds, reserved example domains, etc.).
-    for (const pattern of PII_PATTERNS) {
-      const regex = new RegExp(pattern.regex.source, pattern.regex.flags);
-      const matches = text.match(regex);
-      if (matches) {
-        const filtered = matches.filter((m) =>
-          !isAllowlisted(m, pattern.name) &&
-          (typeof pattern.validate !== "function" || pattern.validate(m))
-        );
+    try {
+      for (const pattern of COMPILED_PII_PATTERNS) {
+        const matches = text.match(pattern.compiledRegex);
+        if (!matches) continue;
+        const isBusinessId = pattern.name === "SIREN" || pattern.name === "SIRET";
+        const filtered = matches.filter((m) => {
+          if (isAllowlisted(m, pattern.name)) return false;
+          if (typeof pattern.validate === "function" && !pattern.validate(m)) return false;
+          if (isBusinessId) {
+            const idx = text.indexOf(m);
+            if (idx < 0 || !hasBusinessContext(text, idx, m.length)) return false;
+          }
+          return true;
+        });
         if (filtered.length > 0) {
           findings.push({
             type: pattern.name,
@@ -357,47 +412,83 @@
           });
         }
       }
+    } catch (err) {
+      console.warn("[LLM Guard] Layer 1 regex scan failed:", err?.message || err);
+      layerErrors.push({ layer: 1, error: String(err?.message || err) });
     }
 
     // Layer 1.5: Simple keywords
-    const lowerText = text.toLowerCase();
-    const foundKeywords = SENSITIVE_KEYWORDS.filter((kw) =>
-      lowerText.includes(kw.toLowerCase())
-    );
-    if (foundKeywords.length > 0) {
-      findings.push({
-        type: "Mot-clé sensible RGPD",
-        severity: "medium",
-        count: foundKeywords.length,
-        samples: foundKeywords.slice(0, 3),
-      });
+    try {
+      const lowerText = text.toLowerCase();
+      const foundKeywords = SENSITIVE_KEYWORDS.filter((kw) =>
+        lowerText.includes(kw.toLowerCase())
+      );
+      if (foundKeywords.length > 0) {
+        findings.push({
+          type: "Mot-clé sensible RGPD",
+          severity: "medium",
+          count: foundKeywords.length,
+          samples: foundKeywords.slice(0, 3),
+        });
+      }
+    } catch (err) {
+      console.warn("[LLM Guard] Layer 1.5 keyword scan failed:", err?.message || err);
+      layerErrors.push({ layer: 1.5, error: String(err?.message || err) });
     }
 
     // Layer 1.6: Company blacklist regex patterns
-    for (const entry of companyConfig.blacklistRegex) {
-      try {
-        const regex = new RegExp(entry.pattern, "gi");
-        const matches = text.match(regex);
-        if (matches && matches.length > 0) {
-          findings.push({
-            type: `Blacklist: ${entry.category}`,
-            severity: entry.severity || "high",
-            count: matches.length,
-            samples: matches.slice(0, 3),
-          });
-        }
-      } catch { /* skip invalid regex */ }
+    try {
+      for (const entry of companyConfig.blacklistRegex) {
+        try {
+          const regex = new RegExp(entry.pattern, "gi");
+          const matches = text.match(regex);
+          if (matches && matches.length > 0) {
+            findings.push({
+              type: `Blacklist: ${entry.category}`,
+              severity: entry.severity || "high",
+              count: matches.length,
+              samples: matches.slice(0, 3),
+            });
+          }
+        } catch { /* skip invalid regex (per-entry) */ }
+      }
+    } catch (err) {
+      console.warn("[LLM Guard] Layer 1.6 blacklist scan failed:", err?.message || err);
+      layerErrors.push({ layer: 1.6, error: String(err?.message || err) });
     }
 
     // Layer 2: Fuzzy keywords (includes company blacklist terms)
-    findings.push(...scanFuzzyKeywords(text));
+    try {
+      findings.push(...scanFuzzyKeywords(text));
+    } catch (err) {
+      console.warn("[LLM Guard] Layer 2 fuzzy scan failed:", err?.message || err);
+      layerErrors.push({ layer: 2, error: String(err?.message || err) });
+    }
 
     // Layer 3: Contextual rules
-    findings.push(...scanContextual(text));
+    try {
+      findings.push(...scanContextual(text));
+    } catch (err) {
+      console.warn("[LLM Guard] Layer 3 contextual scan failed:", err?.message || err);
+      layerErrors.push({ layer: 3, error: String(err?.message || err) });
+    }
 
     // Layer 4: Local NLP (Presidio) — opt-in, configured in options page
     if (CONFIG.layer4.enabled) {
-      findings.push(...(await scanLayer4(text)));
+      try {
+        findings.push(...(await scanLayer4(text)));
+      } catch (err) {
+        console.warn("[LLM Guard] Layer 4 scan failed:", err?.message || err);
+        layerErrors.push({ layer: 4, error: String(err?.message || err) });
+      }
+    }
+
+    if (layerErrors.length > 0) {
+      // Mark the first finding (or synthesize a marker) so the banner can
+      // warn the user that detection was partial. Don't cache failures so
+      // a transient error resolves on the next scan.
+      findings.__layerErrors = layerErrors;
+      return findings;
     }
 
     scanCache.set(key, findings);
@@ -431,7 +522,9 @@
       try {
         const buf = await file.arrayBuffer();
         sha256 = await sha256Hex(buf);
-      } catch { /* non-fatal */ }
+      } catch (err) {
+        console.warn(`[LLM Guard] sha256 hash failed for ${file?.name || "unknown file"}:`, err?.message || err);
+      }
 
       const allowlisted = sha256 && isAttachmentAllowlisted(sha256, scan.filename);
       const findings = (!allowlisted && scan.text) ? await scanForPII(scan.text) : [];
@@ -548,7 +641,9 @@
     for (const f of fileList) {
       // Kick off scans eagerly — results land in the WeakMap for the
       // fetch/XHR patches to pick up when the site actually uploads.
-      ensureAttachmentScan(f).catch(() => {});
+      ensureAttachmentScan(f).catch((err) => {
+        console.warn(`[LLM Guard] prescan failed for ${f?.name || "unknown file"}:`, err?.message || err);
+      });
     }
   }
 
@@ -713,7 +808,9 @@
           const cached = attachmentScanCache.get(f);
           if (!cached) {
             // No pre-scan: kick one off for telemetry; can't block this send.
-            ensureAttachmentScan(f).catch(() => {});
+            ensureAttachmentScan(f).catch((err) => {
+              console.warn(`[LLM Guard] XHR late-scan failed for ${f?.name || "unknown file"}:`, err?.message || err);
+            });
             continue;
           }
           cached.then((r) => {
@@ -738,7 +835,9 @@
                 try { this.abort(); } catch { /* already sent */ }
               }
             }
-          }).catch(() => {});
+          }).catch((err) => {
+            console.warn("[LLM Guard] XHR post-scan error:", err?.message || err);
+          });
         }
       }
       return originalSend.apply(this, arguments);
@@ -844,6 +943,61 @@
     const btn = e.target && e.target.closest && e.target.closest('button[type="submit"], button[aria-label*="Send" i], button[data-testid*="send" i], button[aria-label*="Envoyer" i]');
     if (btn) rewriteComposerWithPlaceholders();
   }, true);
+
+  // React/Vue/Angular often re-render controlled inputs milliseconds after
+  // we write a placeholder, rolling back our value before the fetch fires.
+  // A focused MutationObserver on the composer subtree re-applies the
+  // placeholders whenever the framework mutates the field. Scoped to the
+  // composer selector so we don't observe the whole document (costly) and
+  // only active in visible mode.
+  let composerObserver = null;
+  let composerObserverReschedule = null;
+  function ensureComposerObserver() {
+    if (CONFIG.mode !== "visible") {
+      if (composerObserver) {
+        composerObserver.disconnect();
+        composerObserver = null;
+      }
+      return;
+    }
+    if (composerObserver) return;
+    const selector = ACTIVE_LLM.composerSelector;
+    if (!selector) return;
+    const target = document.querySelector(selector);
+    if (!target) {
+      // Not mounted yet — try again shortly. Backoff once to avoid thrashing.
+      if (!composerObserverReschedule) {
+        composerObserverReschedule = setTimeout(() => {
+          composerObserverReschedule = null;
+          ensureComposerObserver();
+        }, 1000);
+      }
+      return;
+    }
+    let pending = false;
+    composerObserver = new MutationObserver(() => {
+      if (pending) return;
+      pending = true;
+      // Coalesce bursts (one re-render can fire 10+ mutations) so we only
+      // run the rewrite once per animation frame.
+      requestAnimationFrame(() => {
+        pending = false;
+        rewriteComposerWithPlaceholders();
+      });
+    });
+    composerObserver.observe(target, {
+      childList: true,
+      characterData: true,
+      subtree: true,
+      attributes: true,
+      attributeFilter: ["value"],
+    });
+  }
+  ensureComposerObserver();
+  // Re-check periodically: single-page apps mount/unmount the composer on
+  // route changes. 2s is slow enough to be negligible and fast enough that
+  // users don't notice the gap after navigation.
+  setInterval(ensureComposerObserver, 2000);
 
   // ─── Visible mode: floating Reveal/Hide button ──────────────
   if (window.__llmGuard.ui.addRevealToggleButton) {

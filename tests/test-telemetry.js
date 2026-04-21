@@ -246,8 +246,59 @@ function reset() {
     assert(telemetry._internals.joinUrl("https://x.com", "v1/events") === "https://x.com/v1/events");
   });
 
+  console.log("\n\x1b[1mQueue eviction + flush stats\x1b[0m");
+
+  await test("Overfill evicts oldest and bumps evictedCount", async () => {
+    reset();
+    const telemetry = require("../telemetry.js");
+    await telemetry.setConfig({ enabled: true, backendUrl: "https://api.example", deviceToken: "t", orgId: "o" });
+    // Pre-seed outbox close to the 2000 cap.
+    const pre = Array.from({ length: 1999 }, (_, i) => ({ eventId: "old-" + i }));
+    await mockStorage.set({ guard_outbox: pre });
+    // Enqueue 5 new events → should trigger eviction (4 dropped).
+    for (let i = 0; i < 5; i++) {
+      await telemetry.enqueue({
+        timestamp: "2026-01-01T00:00:00Z",
+        url: "https://chatgpt.com/",
+        llm: "ChatGPT",
+        action: "CLEAN",
+      });
+    }
+    assert(fakeStore.guard_outbox.length === 2000, `expected 2000, got ${fakeStore.guard_outbox.length}`);
+    const state = fakeStore.guard_telemetry_state;
+    assert(state.evictedCount === 4, `expected evictedCount=4, got ${state.evictedCount}`);
+    assert(typeof state.lastEvictionAt === "string", "lastEvictionAt should be set");
+  });
+
+  await test("Successful flush increments totalFlushAttempts + totalFlushSuccesses", async () => {
+    reset();
+    const telemetry = require("../telemetry.js");
+    await telemetry.setConfig({ enabled: true, backendUrl: "https://api.example", deviceToken: "t", orgId: "o" });
+    await telemetry.enqueue({ timestamp: "2026-01-01T00:00:00Z", url: "https://chatgpt.com/", llm: "ChatGPT", action: "CLEAN" });
+    await telemetry.flush();
+    const st = fakeStore.guard_telemetry_state;
+    assert(st.totalFlushAttempts >= 1, "attempts should have incremented");
+    assert(st.totalFlushSuccesses === 1, `expected totalFlushSuccesses=1, got ${st.totalFlushSuccesses}`);
+    assert(st.lastError === null, "lastError should clear on success");
+  });
+
+  await test("Failed flush records lastErrorAt timestamp", async () => {
+    reset();
+    const telemetry = require("../telemetry.js");
+    fetchResponder = () => ({ ok: false, status: 503, text: async () => "upstream down" });
+    await telemetry.setConfig({ enabled: true, backendUrl: "https://api.example", deviceToken: "t", orgId: "o" });
+    await telemetry.enqueue({ timestamp: "2026-01-01T00:00:00Z", url: "https://chatgpt.com/", llm: "ChatGPT", action: "CLEAN" });
+    await telemetry.flush();
+    const st = fakeStore.guard_telemetry_state;
+    assert(/HTTP 503/.test(st.lastError), `lastError should contain HTTP 503; got: ${st.lastError}`);
+    assert(typeof st.lastErrorAt === "string", "lastErrorAt should be set");
+    assert(st.totalFlushSuccesses === 0 || st.totalFlushSuccesses == null, "no successes on 503");
+  });
+
   // ─── Résumé ────────────────────────────────────────────────────
   console.log(`\n${"=".repeat(50)}`);
   console.log(`Total: ${total}  \x1b[32mPassed: ${passed}\x1b[0m  \x1b[31mFailed: ${failed}\x1b[0m`);
-  if (failed > 0) process.exit(1);
+  // Explicit exit: the failing-flush tests schedule retry timers that would
+  // otherwise keep Node alive until the 5-minute backoff cap elapses.
+  process.exit(failed > 0 ? 1 : 0);
 })();

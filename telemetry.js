@@ -54,7 +54,12 @@ async function getState() {
     queued: 0,
     lastSentAt: null,
     lastError: null,
+    lastErrorAt: null,
     consecutiveFailures: 0,
+    evictedCount: 0,
+    lastEvictionAt: null,
+    totalFlushAttempts: 0,
+    totalFlushSuccesses: 0,
   };
 }
 
@@ -81,11 +86,26 @@ async function enqueue(rawEvent) {
     const r = await chrome.storage.local.get([TELEMETRY_OUTBOX_KEY]);
     const outbox = r[TELEMETRY_OUTBOX_KEY] || [];
     outbox.push(scrubbed);
+    // LRU eviction: drop oldest-first when we exceed maxOutbox and track how
+    // many events were dropped so the options page can surface it. Without
+    // this counter, long backend outages silently lose events.
+    let evictedThisCall = 0;
     if (outbox.length > DEFAULTS.maxOutbox) {
-      outbox.splice(0, outbox.length - DEFAULTS.maxOutbox);
+      evictedThisCall = outbox.length - DEFAULTS.maxOutbox;
+      outbox.splice(0, evictedThisCall);
     }
     await chrome.storage.local.set({ [TELEMETRY_OUTBOX_KEY]: outbox });
-    await setState({ queued: outbox.length });
+    if (evictedThisCall > 0) {
+      const prev = await getState();
+      await setState({
+        queued: outbox.length,
+        evictedCount: (prev.evictedCount || 0) + evictedThisCall,
+        lastEvictionAt: new Date().toISOString(),
+      });
+      console.warn(`[LLM Guard telemetry] Outbox full — evicted ${evictedThisCall} old event(s). Backend may be unreachable.`);
+    } else {
+      await setState({ queued: outbox.length });
+    }
 
     scheduleFlush();
   } catch (err) {
@@ -193,6 +213,9 @@ async function flush() {
     const batch = outbox.slice(0, DEFAULTS.batchSize);
     const url = joinUrl(config.backendUrl, "/v1/events");
 
+    const prevState = await getState();
+    await setState({ totalFlushAttempts: (prevState.totalFlushAttempts || 0) + 1 });
+
     let response;
     try {
       response = await fetch(url, {
@@ -204,14 +227,18 @@ async function flush() {
         body: JSON.stringify({ events: batch }),
       });
     } catch (err) {
-      await handleFailure(err.message || "network error");
+      await handleFailure(err.message || "network error", { batchSize: batch.length, url });
       flushing = false;
       return;
     }
 
     if (!response.ok) {
       const body = await safeText(response);
-      await handleFailure(`HTTP ${response.status}: ${body.slice(0, 200)}`);
+      await handleFailure(`HTTP ${response.status}: ${body.slice(0, 200)}`, {
+        batchSize: batch.length,
+        url,
+        status: response.status,
+      });
       flushing = false;
       return;
     }
@@ -221,11 +248,14 @@ async function flush() {
     const freshOutbox = fresh[TELEMETRY_OUTBOX_KEY] || [];
     const remaining = freshOutbox.slice(batch.length);
     await chrome.storage.local.set({ [TELEMETRY_OUTBOX_KEY]: remaining });
+    const afterSuccess = await getState();
     await setState({
       queued: remaining.length,
       lastSentAt: new Date().toISOString(),
       lastError: null,
+      lastErrorAt: null,
       consecutiveFailures: 0,
+      totalFlushSuccesses: (afterSuccess.totalFlushSuccesses || 0) + 1,
     });
 
     // If more remains, flush again soon.
@@ -235,7 +265,7 @@ async function flush() {
   }
 }
 
-async function handleFailure(message) {
+async function handleFailure(message, context = {}) {
   const state = await getState();
   const failures = (state.consecutiveFailures || 0) + 1;
   const backoff = Math.min(
@@ -245,11 +275,17 @@ async function handleFailure(message) {
   await setState({
     consecutiveFailures: failures,
     lastError: message,
+    lastErrorAt: new Date().toISOString(),
   });
+  // Structured log so users investigating "why aren't events leaving" can
+  // see the URL, batch size, and HTTP status at a glance in the console.
+  const ctx = Object.entries(context).map(([k, v]) => `${k}=${v}`).join(" ");
+  console.warn(`[LLM Guard telemetry] send failed (attempt ${failures}/${DEFAULTS.maxRetries}): ${message}${ctx ? " " + ctx : ""}`);
   if (failures <= DEFAULTS.maxRetries) {
     scheduleFlush(backoff);
+  } else {
+    console.warn(`[LLM Guard telemetry] exhausted ${DEFAULTS.maxRetries} retries — queue is stuck. Check backend URL and device token in options.`);
   }
-  console.warn(`[LLM Guard telemetry] send failed (attempt ${failures}): ${message}`);
 }
 
 function joinUrl(base, path) {

@@ -1,5 +1,7 @@
 package com.llmguard.api.config;
 
+import com.llmguard.api.audit.AuditLogFilter;
+import com.llmguard.api.auth.AuthRateLimiter;
 import com.llmguard.api.auth.DeviceTokenAuthFilter;
 import com.llmguard.api.auth.DeviceTokenService;
 import org.springframework.beans.factory.annotation.Value;
@@ -25,7 +27,9 @@ public class SecurityConfig {
     SecurityFilterChain filterChain(
             HttpSecurity http,
             DeviceTokenService tokens,
+            AuthRateLimiter rateLimiter,
             CorsConfigurationSource corsSource,
+            AuditLogFilter auditLogFilter,
             @Value("${spring.security.oauth2.resourceserver.jwt.issuer-uri:}") String keycloakIssuer)
             throws Exception {
 
@@ -43,7 +47,11 @@ public class SecurityConfig {
                     .access((auth2, ctx) -> new org.springframework.security.authorization.AuthorizationDecision(
                             !jwtEnabled || auth2.get().isAuthenticated()))
                 .anyRequest().permitAll())
-            .addFilterBefore(new DeviceTokenAuthFilter(tokens), UsernamePasswordAuthenticationFilter.class);
+            .addFilterBefore(new DeviceTokenAuthFilter(tokens, rateLimiter), UsernamePasswordAuthenticationFilter.class)
+            // Registered directly here — @Component + @Order alone isn't enough when
+            // Spring Security builds its own chain; this line guarantees every
+            // /v1/* request is observed and logged with the resolved principal.
+            .addFilterAfter(auditLogFilter, DeviceTokenAuthFilter.class);
 
         if (jwtEnabled) {
             http.oauth2ResourceServer(oauth -> oauth.jwt(jwt -> {}));

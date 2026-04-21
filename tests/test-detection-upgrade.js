@@ -139,8 +139,19 @@ test("deanonymize restores original from hashed placeholder", () => {
   assert.strictEqual(a.deanonymize(`reply to ${ph}`), "reply to alice@acme.com");
 });
 
-test("counter strategy is still the default (backward compat)", () => {
-  const a = createAnonymizer({ patterns: PII_PATTERNS });
+test("hashed strategy is now the default (post-collision-fix)", () => {
+  // Previously: counter was the default, which had a cross-prompt collision
+  // risk (two turns both starting at [EMAIL_1] → wrong de-anonymization when
+  // old mappings are reused). The default is now hashed; explicit
+  // `placeholderStrategy: "counter"` still works for callers that need it.
+  const a = createAnonymizer({ patterns: PII_PATTERNS, sessionSalt: "fixed" });
+  const r = a.anonymize("a@x.com");
+  const ph = [...r.mappings.keys()][0];
+  assert.match(ph, /^\[EMAIL_[0-9a-f]{6}(?:_\d+)?\]$/);
+});
+
+test("explicit counter strategy still available", () => {
+  const a = createAnonymizer({ patterns: PII_PATTERNS, placeholderStrategy: "counter" });
   const r = a.anonymize("a@x.com");
   const ph = [...r.mappings.keys()][0];
   assert.strictEqual(ph, "[EMAIL_1]");
