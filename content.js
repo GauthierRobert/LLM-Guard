@@ -1047,7 +1047,7 @@
   // Replace PII in the composer DOM node with placeholders right before the
   // user submits, so they see [EMAIL_1] etc. The fetch intercept is idempotent
   // on placeholders, so no double-encoding.
-  async function rewriteComposerWithPlaceholders() {
+  function rewriteComposerWithPlaceholders() {
     if (CONFIG.mode !== "visible") return;
     const selector = ACTIVE_LLM.composerSelector;
     if (!selector) return;
@@ -1056,10 +1056,13 @@
       const isTextarea = el.tagName === "TEXTAREA" || el.tagName === "INPUT";
       const value = isTextarea ? el.value : el.innerText;
       if (!value || !value.trim()) continue;
-      // anonymizeText is async (it may await Presidio). Awaiting here is
-      // required — a prior version destructured the Promise directly which
-      // silently disabled visible-mode composer rewrites entirely.
-      const { anonymized, changed } = await anonymizeText(value);
+      // Use the synchronous regex anonymizer directly (skip the async
+      // Presidio augmentation). The composer rewrite fires during Enter /
+      // Send-click capture-phase handlers and must complete before the
+      // framework reads the value, so any `await` races the submit. The
+      // outgoing fetch intercept still runs the full async pipeline for
+      // the wire payload — this pass is only for what the user sees.
+      const { anonymized, changed } = anonymizer.anonymize(value);
       if (!changed) continue;
       if (isTextarea) {
         // React-controlled inputs: use the native setter so the change event
@@ -1158,6 +1161,51 @@
       anonymizer,
     });
   }
+
+  // ─── Visible mode: conversation observer ────────────────────
+  // Without continuous re-application, two things break in visible mode:
+  //  1. LLM streaming writes new tokens into existing text nodes, clobbering
+  //     any placeholder→original rewrite the user triggered via the reveal
+  //     button. After a few tokens the DOM "un-reveals" itself.
+  //  2. The user's own message bubble is rendered by the LLM site from raw
+  //     input (not from our anonymized wire payload), so it keeps showing
+  //     real PII even though visible mode promises placeholders.
+  // The observer below runs on every conversation mutation and calls the
+  // ui helper, which re-applies the current reveal state (hide by default,
+  // show when the user has toggled reveal on).
+  let conversationObserver = null;
+  let conversationReapplyScheduled = false;
+  function ensureConversationObserver() {
+    if (CONFIG.mode !== "visible") {
+      if (conversationObserver) {
+        conversationObserver.disconnect();
+        conversationObserver = null;
+      }
+      return;
+    }
+    if (conversationObserver) return;
+    const sel = ACTIVE_LLM.conversationSelector || "main";
+    const target = document.querySelector(sel) || document.body;
+    if (!target) return;
+    conversationObserver = new MutationObserver(() => {
+      if (conversationReapplyScheduled) return;
+      conversationReapplyScheduled = true;
+      // Coalesce streaming bursts — one token can fire many mutations.
+      requestAnimationFrame(() => {
+        conversationReapplyScheduled = false;
+        if (window.__llmGuard.ui.reapplyRevealState) {
+          window.__llmGuard.ui.reapplyRevealState();
+        }
+      });
+    });
+    conversationObserver.observe(target, {
+      childList: true,
+      characterData: true,
+      subtree: true,
+    });
+  }
+  ensureConversationObserver();
+  setInterval(ensureConversationObserver, 2000);
 
   console.log(
     `%c[LLM Guard] Actif sur ${ACTIVE_LLM.name} (mode: ${CONFIG.mode})`,
