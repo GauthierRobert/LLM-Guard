@@ -4,3 +4,6 @@ config/company-rules.js
 api-java/.gradle/
 api-java/build/
 infra/.env
+dashboard/node_modules/
+dashboard/dist/
+dashboard/.angular/
