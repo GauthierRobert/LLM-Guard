@@ -15,6 +15,22 @@ export const routes: Routes = [
     loadComponent: () => import('./features/findings/findings.component').then((m) => m.FindingsComponent),
   },
   {
+    path: 'compliance',
+    loadComponent: () => import('./features/compliance/compliance.component').then((m) => m.ComplianceComponent),
+  },
+  {
+    path: 'dpia',
+    loadComponent: () => import('./features/dpia/dpia.component').then((m) => m.DpiaComponent),
+  },
+  {
+    path: 'risk-tiers',
+    loadComponent: () => import('./features/risk-tiers/risk-tiers.component').then((m) => m.RiskTiersComponent),
+  },
+  {
+    path: 'transfers',
+    loadComponent: () => import('./features/transfers/transfers.component').then((m) => m.TransfersComponent),
+  },
+  {
     path: 'devices',
     loadComponent: () => import('./features/devices/devices.component').then((m) => m.DevicesComponent),
   },
