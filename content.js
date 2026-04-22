@@ -149,8 +149,10 @@
       if (!prom) return;
       presidioRequestMap.delete(evt.data.reqId);
       clearTimeout(prom.timer);
-      if (evt.data.error) prom.reject(new Error(evt.data.error));
-      else prom.resolve({ ok: evt.data.ok, data: evt.data.data });
+      // Resolve with the full envelope (including error) so callers can
+      // distinguish HOST_PERMISSION_MISSING from network failures without
+      // parsing Error.message strings.
+      prom.resolve({ ok: !!evt.data.ok, data: evt.data.data, error: evt.data.error || null });
       return;
     }
 
@@ -173,11 +175,14 @@
 
     if (evt.data.type === "layer4Update") {
       const next = evt.data.layer4 || {};
-      const urlChanged = next.presidioUrl !== CONFIG.layer4.presidioUrl;
+      // Trim trailing slash so concatenating `/health`/`/analyze` never
+      // produces `//health` (Presidio responds 404 on the double slash).
+      const nextUrl = (next.presidioUrl || "").replace(/\/+$/, "");
+      const urlChanged = nextUrl !== CONFIG.layer4.presidioUrl;
       const enabledChanged = !!next.enabled !== CONFIG.layer4.enabled;
       CONFIG.layer4 = {
         enabled: !!next.enabled,
-        presidioUrl: next.presidioUrl || "",
+        presidioUrl: nextUrl,
         usePresidioAnonymizer: !!next.usePresidioAnonymizer,
       };
       // Force re-init on next scan if URL changed or toggle flipped
@@ -387,39 +392,58 @@
 
   function createPresidioProxy(analyzerUrl) {
     let _ready = false;
+    const base = analyzerUrl.replace(/\/+$/, "");
     return {
       get ready() { return _ready; },
       async init() {
         try {
-          const { ok } = await presidioFetch(`${analyzerUrl}/health`);
-          _ready = ok;
-          if (_ready) console.log("[LLM Guard] Presidio connecté (proxy background)");
-          else console.warn("[LLM Guard] Presidio non accessible");
-        } catch {
+          const resp = await presidioFetch(`${base}/health`);
+          _ready = !!resp.ok;
+          if (_ready) {
+            console.log("[LLM Guard] Presidio connecté (proxy background)");
+          } else if (resp.error === "HOST_PERMISSION_MISSING") {
+            console.warn(
+              "[LLM Guard] Presidio: permission d'accès non accordée pour " + base +
+              ". Ouvrez la page Options et cliquez « Tester » pour autoriser."
+            );
+          } else {
+            console.warn("[LLM Guard] Presidio non accessible:", resp.error || "inconnu");
+          }
+        } catch (err) {
           _ready = false;
-          console.warn("[LLM Guard] Presidio non accessible");
+          console.warn("[LLM Guard] Presidio non accessible:", err?.message || err);
         }
       },
       async classify(text) {
         if (!_ready) return [];
         try {
-          const { ok, data } = await presidioFetch(`${analyzerUrl}/analyze`,
+          const resp = await presidioFetch(`${base}/analyze`,
             { text, language: "fr", entities: PRESIDIO_ENTITIES, score_threshold: 0.6 }, "POST");
-          if (!ok || !Array.isArray(data)) return [];
-          return data.map(r => ({
+          if (!resp.ok || !Array.isArray(resp.data)) {
+            if (resp.error) console.warn("[LLM Guard] Presidio /analyze failed:", resp.error);
+            return [];
+          }
+          return resp.data.map(r => ({
             layer: "presidio", type: mapPresidioType(r.entity_type),
             severity: mapPresidioSeverity(r.entity_type), confidence: r.score,
             matches: [text.slice(r.start, r.end)], start: r.start, end: r.end,
           }));
-        } catch { return []; }
+        } catch (err) {
+          console.warn("[LLM Guard] Presidio classify error:", err?.message || err);
+          return [];
+        }
       },
       async analyzeSpans(text) {
         if (!_ready) return [];
         try {
-          const { ok, data } = await presidioFetch(`${analyzerUrl}/analyze`,
+          const resp = await presidioFetch(`${base}/analyze`,
             { text, language: "fr", entities: PRESIDIO_ENTITIES, score_threshold: 0.6 }, "POST");
-          return (ok && Array.isArray(data)) ? data : [];
-        } catch { return []; }
+          if (!resp.ok && resp.error) console.warn("[LLM Guard] Presidio /analyze failed:", resp.error);
+          return (resp.ok && Array.isArray(resp.data)) ? resp.data : [];
+        } catch (err) {
+          console.warn("[LLM Guard] Presidio analyzeSpans error:", err?.message || err);
+          return [];
+        }
       },
     };
   }
@@ -1023,7 +1047,7 @@
   // Replace PII in the composer DOM node with placeholders right before the
   // user submits, so they see [EMAIL_1] etc. The fetch intercept is idempotent
   // on placeholders, so no double-encoding.
-  function rewriteComposerWithPlaceholders() {
+  async function rewriteComposerWithPlaceholders() {
     if (CONFIG.mode !== "visible") return;
     const selector = ACTIVE_LLM.composerSelector;
     if (!selector) return;
@@ -1032,7 +1056,10 @@
       const isTextarea = el.tagName === "TEXTAREA" || el.tagName === "INPUT";
       const value = isTextarea ? el.value : el.innerText;
       if (!value || !value.trim()) continue;
-      const { anonymized, changed } = anonymizeText(value);
+      // anonymizeText is async (it may await Presidio). Awaiting here is
+      // required — a prior version destructured the Promise directly which
+      // silently disabled visible-mode composer rewrites entirely.
+      const { anonymized, changed } = await anonymizeText(value);
       if (!changed) continue;
       if (isTextarea) {
         // React-controlled inputs: use the native setter so the change event

@@ -65,7 +65,7 @@ async function saveConfig() {
     if (!ok) return showStatus("Enregistrement annulé. Utilisez HTTPS en production.", "err");
   }
 
-  const layer4Url = $("opt-layer4-presidio-url").value.trim();
+  const layer4Url = $("opt-layer4-presidio-url").value.trim().replace(/\/+$/, "");
   if (layer4Url && !/^https?:\/\//i.test(layer4Url)) {
     return showStatus("L'URL Presidio doit commencer par http:// ou https://", "err");
   }
@@ -80,6 +80,17 @@ async function saveConfig() {
       usePresidioAnonymizer: $("opt-layer4-use-anonymizer").checked,
     },
   });
+
+  // If Layer 4 is enabled with a Presidio URL, ensure the optional host
+  // permission is granted. Without it the service-worker fetch to Presidio
+  // is blocked and Layer 4 silently degrades to empty results.
+  if ($("opt-layer4-enabled").checked && layer4Url) {
+    const granted = await ensurePresidioPermission(layer4Url);
+    if (!granted) {
+      showStatus("Configuration enregistrée — autorisation d'accès à Presidio refusée. Cliquez Tester pour la redemander.", "err");
+      return;
+    }
+  }
 
   const maxMb = parseFloat($("opt-attachment-max-mb").value);
   await chrome.storage.local.set({
@@ -120,19 +131,57 @@ async function loadLayer4Config() {
 }
 
 async function testLayer4() {
-  const url = $("opt-layer4-presidio-url").value.trim();
+  const rawUrl = $("opt-layer4-presidio-url").value.trim();
   const statusEl = $("layer4-status");
-  if (!url) {
+  if (!rawUrl) {
     statusEl.textContent = "URL manquante";
     return;
   }
-  statusEl.textContent = "Test…";
-  try {
-    const res = await fetch(url.replace(/\/+$/, "") + "/health", { method: "GET" });
-    statusEl.textContent = res.ok ? `OK (HTTP ${res.status})` : `Échec (HTTP ${res.status})`;
-  } catch (err) {
-    statusEl.textContent = `Échec: ${err?.message || err}`;
+  if (!/^https?:\/\//i.test(rawUrl)) {
+    statusEl.textContent = "URL invalide (http:// ou https:// requis)";
+    return;
   }
+  const url = rawUrl.replace(/\/+$/, "");
+  statusEl.textContent = "Test…";
+
+  // Persist the URL so the background proxy will accept the test fetch
+  // (it refuses to proxy any URL that doesn't match the stored one).
+  const current = (await chrome.storage.local.get(["guard_layer4"])).guard_layer4 || {};
+  await chrome.storage.local.set({ guard_layer4: { ...current, presidioUrl: url } });
+
+  // Request the host permission so the background fetch can actually reach
+  // the user's Presidio host. Must be called from a user-action handler.
+  const granted = await ensurePresidioPermission(url);
+  if (!granted) {
+    statusEl.textContent = "Échec: autorisation refusée pour " + url;
+    return;
+  }
+
+  // Route the test through the same proxy the content script uses, so a
+  // successful test guarantees the production path works.
+  const res = await sendMsg({ type: "presidio.fetch", url: url + "/health", method: "GET" });
+  if (res?.ok) {
+    statusEl.textContent = `OK (HTTP ${res.status})`;
+  } else if (res?.error === "HOST_PERMISSION_MISSING") {
+    statusEl.textContent = "Échec: permission manquante — cliquez Tester à nouveau pour accorder";
+  } else {
+    statusEl.textContent = `Échec: ${res?.error || "inconnu"}`;
+  }
+}
+
+function ensurePresidioPermission(presidioBase) {
+  return new Promise((resolve) => {
+    try {
+      chrome.permissions.contains({ origins: [presidioBase + "/*"] }, (alreadyGranted) => {
+        if (alreadyGranted) { resolve(true); return; }
+        chrome.permissions.request({ origins: [presidioBase + "/*"] }, (granted) => {
+          resolve(!!granted && !chrome.runtime.lastError);
+        });
+      });
+    } catch {
+      resolve(false);
+    }
+  });
 }
 
 async function loadState() {
