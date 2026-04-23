@@ -84,16 +84,49 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
         sendResponse({ error: "URL not allowed" });
         return;
       }
+      // Host permission gate: the Presidio host is user-configured and falls
+      // under optional_host_permissions. Without an explicit grant the
+      // service-worker fetch fails opaquely (looks like a network error to
+      // the caller). Detect the missing permission up-front and surface a
+      // specific error so the options page can offer to request it.
+      const hasPermission = await hasPresidioPermission(presidioBase);
+      if (!hasPermission) {
+        sendResponse({ error: "HOST_PERMISSION_MISSING", presidioBase });
+        return;
+      }
       try {
         const opts = { method: message.method || "GET", headers: { "Content-Type": "application/json" } };
         if (message.body) opts.body = JSON.stringify(message.body);
         const resp = await fetch(message.url, opts);
         const data = resp.ok ? await resp.json() : null;
-        sendResponse({ ok: resp.ok, status: resp.status, data });
+        const errorText = resp.ok ? null : await resp.text().catch(() => null);
+        sendResponse({ ok: resp.ok, status: resp.status, data, error: resp.ok ? null : `HTTP ${resp.status}${errorText ? ": " + errorText.slice(0, 200) : ""}` });
       } catch (err) {
+        console.warn("[LLM Guard] Presidio fetch failed:", message.url, err?.message || err);
         sendResponse({ error: err?.message || String(err) });
       }
     });
+    return true;
+  }
+
+  if (message.type === "presidio.requestPermission") {
+    const base = (message.presidioBase || "").replace(/\/+$/, "");
+    if (!base || !/^https?:\/\//i.test(base)) {
+      sendResponse({ ok: false, error: "invalid URL" });
+      return true;
+    }
+    chrome.permissions.request({ origins: [base + "/*"] }, (granted) => {
+      const err = chrome.runtime.lastError;
+      if (err) sendResponse({ ok: false, error: err.message });
+      else sendResponse({ ok: !!granted });
+    });
+    return true;
+  }
+
+  if (message.type === "presidio.hasPermission") {
+    const base = (message.presidioBase || "").replace(/\/+$/, "");
+    if (!base) { sendResponse({ ok: false }); return true; }
+    hasPresidioPermission(base).then((granted) => sendResponse({ ok: granted }));
     return true;
   }
 
@@ -102,6 +135,19 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
     return true;
   }
 });
+
+function hasPresidioPermission(presidioBase) {
+  return new Promise((resolve) => {
+    try {
+      chrome.permissions.contains({ origins: [presidioBase + "/*"] }, (granted) => {
+        if (chrome.runtime.lastError) { resolve(false); return; }
+        resolve(!!granted);
+      });
+    } catch {
+      resolve(false);
+    }
+  });
+}
 
 async function runConnectivityTest() {
   const cfg = await self.telemetry.getConfig();

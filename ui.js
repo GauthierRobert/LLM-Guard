@@ -247,6 +247,11 @@
   // place between placeholders (the default in visible mode) and real values.
   let revealState = false;
   let revealButtonRef = null;
+  // Re-apply hook populated by addRevealToggleButton. Used by the content
+  // script's conversation observer to re-enforce the current reveal state
+  // whenever the LLM streams new tokens (which would otherwise clobber our
+  // in-place DOM rewrite).
+  let reapplyRevealFn = null;
 
   function addRevealToggleButton({ activeLLM, isVisibleMode, anonymizer }) {
     const btn = document.createElement("button");
@@ -341,6 +346,16 @@
       btn.style.background = revealState ? "#3b1a6e" : "#1a1430";
     });
 
+    // Publish the reapply hook. content.js calls this from a conversation
+    // observer so streaming tokens don't clobber the current reveal state,
+    // and so the user's own message bubble (rendered by the LLM site from
+    // raw input) gets rewritten to placeholders in visible mode.
+    reapplyRevealFn = () => {
+      if (!isVisibleMode()) return;
+      const roots = getConversationRoots();
+      for (const r of roots) rewriteText(r, revealState);
+    };
+
     function mount() {
       if (document.body && !document.getElementById("llm-guard-reveal")) {
         document.body.appendChild(btn);
@@ -349,6 +364,15 @@
     }
     if (document.body) mount();
     else document.addEventListener("DOMContentLoaded", mount);
+  }
+
+  // Re-mount the reveal button if an SPA removed it, and re-enforce the
+  // current reveal state. Called from content.js on conversation mutations.
+  function reapplyRevealState() {
+    if (revealButtonRef && document.body && !document.body.contains(revealButtonRef)) {
+      document.body.appendChild(revealButtonRef);
+    }
+    if (typeof reapplyRevealFn === "function") reapplyRevealFn();
   }
 
   function updateRevealButton(show) {
@@ -366,6 +390,6 @@
   // Browser only -- all functions require DOM APIs
   if (typeof window !== "undefined") {
     window.__llmGuard = window.__llmGuard || {};
-    window.__llmGuard.ui = { showBanner, addStatusBadge, logEvent, addRevealToggleButton, updateRevealButton };
+    window.__llmGuard.ui = { showBanner, addStatusBadge, logEvent, addRevealToggleButton, updateRevealButton, reapplyRevealState };
   }
 })();
