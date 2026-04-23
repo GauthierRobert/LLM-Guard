@@ -49,4 +49,11 @@ public interface EventRepository extends JpaRepository<EventEntity, EventEntity.
             GROUP BY t ORDER BY c DESC LIMIT 50
             """, nativeQuery = true)
     List<Object[]> countByFindingType(@Param("org") String org, @Param("since") OffsetDateTime since);
+
+    @Query("""
+           select e.deviceId, count(e) from EventEntity e
+           where e.orgId = :org and e.timestamp >= :since
+           group by e.deviceId
+           """)
+    List<Object[]> countByDeviceSince(@Param("org") String org, @Param("since") OffsetDateTime since);
 }

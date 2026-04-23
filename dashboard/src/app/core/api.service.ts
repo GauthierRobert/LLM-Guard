@@ -6,6 +6,16 @@ import { LLMGuardEvent, StatsResponse } from './schema.generated';
 
 export type TimeRange = '1h' | '24h' | '7d' | '30d';
 
+export interface DeviceRow {
+  id: string;
+  userHint: string | null;
+  extensionVersion: string | null;
+  createdAt: string | null;
+  lastSeenAt: string | null;
+  revoked: boolean;
+  eventCount24h: number;
+}
+
 @Injectable({ providedIn: 'root' })
 export class ApiService {
   private readonly http = inject(HttpClient);
@@ -24,5 +34,13 @@ export class ApiService {
     return this.http.get<{ items: LLMGuardEvent[]; limit: number; offset: number }>(`${this.base}/v1/events`, {
       params: clean as Record<string, string | number>,
     });
+  }
+
+  devices(): Observable<DeviceRow[]> {
+    return this.http.get<DeviceRow[]>(`${this.base}/v1/devices`);
+  }
+
+  revokeDevice(id: string): Observable<{ id: string; revoked: boolean }> {
+    return this.http.post<{ id: string; revoked: boolean }>(`${this.base}/v1/devices/${encodeURIComponent(id)}/revoke`, {});
   }
 }

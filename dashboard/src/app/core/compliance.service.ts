@@ -1,7 +1,8 @@
 import { Injectable, computed, inject, signal } from '@angular/core';
-import { Observable, catchError, of, tap } from 'rxjs';
+import { Observable, catchError, of, tap, throwError } from 'rxjs';
 
 import { ApiService, TimeRange } from './api.service';
+import { ErrorBusService } from './error-bus.service';
 import { LLMGuardEvent, StatsResponse } from './schema.generated';
 import {
   ARTICLES,
@@ -48,49 +49,55 @@ export interface LLMRiskRow {
   jurisdiction: ProviderInfo | null;
 }
 
-const DEMO_STATS: StatsResponse = {
-  total: 1847,
-  clean: 1203,
-  flagged: 412,
-  blocked: 28,
-  anonymized: 644,
-  by_llm: { ChatGPT: 912, Claude: 482, Gemini: 241, Copilot: 156, Mistral: 38, DeepSeek: 18 },
-  by_type: {
-    email: 284,
-    phone: 178,
-    name: 221,
-    iban: 47,
-    credit_card: 12,
-    ip: 93,
-    health: 31,
-    address: 64,
-    password: 8,
-    biometric: 3,
-    emotion_workplace: 2,
-  },
+const EMPTY_STATS: StatsResponse = {
+  total: 0,
+  clean: 0,
+  flagged: 0,
+  blocked: 0,
+  anonymized: 0,
+  by_llm: {},
+  by_type: {},
 };
 
 @Injectable({ providedIn: 'root' })
 export class ComplianceService {
   private readonly api = inject(ApiService);
+  private readonly errors = inject(ErrorBusService);
 
   private readonly _stats = signal<StatsResponse | null>(null);
   private readonly _events = signal<LLMGuardEvent[]>([]);
+  private readonly _loaded = signal<boolean>(false);
 
-  readonly stats = computed<StatsResponse>(() => this._stats() ?? DEMO_STATS);
+  // Zero stats when the backend hasn't responded yet (or is empty). Downstream
+  // views check `hasData()` to decide whether to render an empty-state banner.
+  readonly stats = computed<StatsResponse>(() => this._stats() ?? EMPTY_STATS);
   readonly events = this._events.asReadonly();
+  readonly loaded = this._loaded.asReadonly();
+  readonly hasData = computed<boolean>(() => (this._stats()?.total ?? 0) > 0);
 
   loadStats(range: TimeRange = '30d'): Observable<StatsResponse> {
     return this.api.stats(range).pipe(
-      tap((s) => this._stats.set(s)),
-      catchError(() => of(DEMO_STATS).pipe(tap((s) => this._stats.set(s)))),
+      tap((s) => {
+        this._stats.set(s);
+        this._loaded.set(true);
+      }),
+      catchError((err) => {
+        this._stats.set(null);
+        this._loaded.set(true);
+        this.errors.push('Impossible de charger les statistiques — API injoignable.');
+        return throwError(() => err);
+      }),
     );
   }
 
   loadRecentEvents(limit = 200): Observable<LLMGuardEvent[]> {
     return this.api.events({ limit }).pipe(
       tap((r) => this._events.set(r.items)),
-      catchError(() => of({ items: [] as LLMGuardEvent[], limit: 0, offset: 0 }).pipe(tap((r) => this._events.set(r.items)))),
+      catchError((err) => {
+        this._events.set([]);
+        this.errors.push('Impossible de charger les événements récents.');
+        return of({ items: [] as LLMGuardEvent[], limit: 0, offset: 0 });
+      }),
     ) as unknown as Observable<LLMGuardEvent[]>;
   }
 
@@ -177,6 +184,24 @@ export class ComplianceService {
 
   // ---------- Feature 5: 72h breach timer ----------
 
+  /**
+   * Scan currently loaded events for the oldest finding of an Art. 9 RGPD
+   * category within the last 72h. `loadRecentEvents()` must have populated
+   * `_events` for this to return a useful result.
+   */
+  firstCriticalEventAt(): Date | null {
+    const criticalTypes = new Set(['health', 'biometric', 'ssn', 'credit_card']);
+    const cutoff = Date.now() - 72 * 3600 * 1000;
+    let earliest: number | null = null;
+    for (const ev of this._events()) {
+      if (!ev.findings?.some((f) => criticalTypes.has(f.type.toLowerCase()))) continue;
+      const t = Date.parse(ev.timestamp);
+      if (!Number.isFinite(t) || t < cutoff) continue;
+      if (earliest === null || t < earliest) earliest = t;
+    }
+    return earliest === null ? null : new Date(earliest);
+  }
+
   breachStatus(): BreachStatus {
     const s = this.stats();
     const critical = (s.by_type['health'] ?? 0) + (s.by_type['biometric'] ?? 0) + (s.by_type['ssn'] ?? 0) + (s.by_type['credit_card'] ?? 0);
@@ -186,9 +211,14 @@ export class ComplianceService {
       return { active: false, triggeredAt: null, deadline: null, remainingMs: 0, triggerReason: '' };
     }
 
+    const triggeredAt = this.firstCriticalEventAt();
+    if (triggeredAt === null) {
+      // Aggregate stats cross the threshold but no critical event is in the
+      // 72h window of loaded events — the breach clock hasn't started from a
+      // concrete incident yet, so don't fabricate a trigger time.
+      return { active: false, triggeredAt: null, deadline: null, remainingMs: 0, triggerReason: '' };
+    }
     const now = Date.now();
-    // Simulate breach trigger 6h ago for demo; in prod this would be stored server-side.
-    const triggeredAt = new Date(now - 6 * 3600 * 1000);
     const deadline = new Date(triggeredAt.getTime() + 72 * 3600 * 1000);
     return {
       active: true,

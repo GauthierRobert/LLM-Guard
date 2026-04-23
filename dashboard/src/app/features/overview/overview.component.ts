@@ -142,6 +142,16 @@ import { ComplianceService } from '../../core/compliance.service';
           }
         </mat-card>
       </section>
+    } @else if (loaded() && !hasData()) {
+      <mat-card class="empty-state">
+        <mat-icon class="empty-icon">shield</mat-icon>
+        <h2>Aucune télémétrie encore reçue</h2>
+        <p>Le backend est opérationnel mais aucun événement n'a été ingéré pour cette période. Deux options&nbsp;:</p>
+        <ol>
+          <li>Activez l'extension&nbsp;: <code>chrome-extension://…/options.html</code> → cochez <em>Enabled</em>, backend <code>http://localhost</code>, org <code>default</code>.</li>
+          <li>Chargez des données de démonstration&nbsp;: <code>bash infra/seed-demo.sh</code>.</li>
+        </ol>
+      </mat-card>
     } @else {
       <p class="empty">Chargement…</p>
     }
@@ -218,6 +228,14 @@ import { ComplianceService } from '../../core/compliance.service';
       .row-fill.warn { background: #EF9F27; }
       .row-count { width: 40px; text-align: right; font-size: 11px; color: #888780; font-variant-numeric: tabular-nums; }
       .empty { color: #5f5e5a; font-size: 12px; }
+      .empty-state { padding: 32px; text-align: center; border: 1px dashed #1e1f23; }
+      .empty-state .empty-icon { font-size: 48px; width: 48px; height: 48px; color: #0F6E56; margin-bottom: 12px; }
+      .empty-state h2 { color: #e1f5ee; font-size: 16px; margin: 0 0 8px; }
+      .empty-state p { color: #888780; font-size: 13px; margin: 4px auto 12px; max-width: 560px; }
+      .empty-state ol { color: #d1d0c7; font-size: 12px; text-align: left; max-width: 560px; margin: 0 auto; padding-left: 20px; }
+      .empty-state li { margin: 4px 0; }
+      .empty-state code { background: #14151a; padding: 2px 6px; border-radius: 4px; font-family: ui-monospace, monospace; font-size: 11px; }
+      .empty-state em { color: #5DCAA5; font-style: normal; }
     `,
   ],
 })
@@ -230,6 +248,8 @@ export class OverviewComponent {
   protected readonly ranges: TimeRange[] = ['1h', '24h', '7d', '30d'];
   protected readonly range = signal<TimeRange>('24h');
   protected readonly stats = signal<StatsResponse | null>(null);
+  protected readonly loaded = this.compliance.loaded;
+  protected readonly hasData = this.compliance.hasData;
   private readonly tick = signal(0);
 
   protected readonly llmRows = computed(() => {
@@ -289,5 +309,7 @@ export class OverviewComponent {
       next: (s) => this.stats.set(s),
       error: () => this.stats.set(null),
     });
+    // Recent events feed the breach timer's firstCriticalEventAt() scan.
+    this.compliance.loadRecentEvents(200).pipe(takeUntilDestroyed(this.destroyRef)).subscribe();
   }
 }

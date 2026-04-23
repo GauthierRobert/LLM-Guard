@@ -43,7 +43,10 @@ public class SecurityConfig {
                 .requestMatchers("/v1/health", "/actuator/**", "/v1/live").permitAll()
                 // POST ingest is enforced by DeviceTokenAuthFilter; permit for the chain.
                 .requestMatchers(HttpMethod.POST, "/v1/events").permitAll()
-                .requestMatchers(HttpMethod.GET, "/v1/events", "/v1/stats", "/v1/findings/**")
+                .requestMatchers(HttpMethod.GET, "/v1/events", "/v1/stats", "/v1/findings/**", "/v1/devices", "/v1/devices/**")
+                    .access((auth2, ctx) -> new org.springframework.security.authorization.AuthorizationDecision(
+                            !jwtEnabled || auth2.get().isAuthenticated()))
+                .requestMatchers(HttpMethod.POST, "/v1/devices/*/revoke")
                     .access((auth2, ctx) -> new org.springframework.security.authorization.AuthorizationDecision(
                             !jwtEnabled || auth2.get().isAuthenticated()))
                 .anyRequest().permitAll())
