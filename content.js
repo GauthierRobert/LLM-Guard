@@ -157,19 +157,27 @@
     }
 
     if (evt.data.type === "modeUpdate") {
-      const m = evt.data.mode;
-      if (m === "anonymize" || m === "block" || m === "visible") CONFIG.mode = m;
-      const badge = document.getElementById("llm-guard-badge");
-      if (badge) {
-        badge.title = `LLM Guard — ${ACTIVE_LLM.name} | mode: ${CONFIG.mode} (cliquez pour changer)`;
-        const bg = CONFIG.mode === "block" ? "#A32D2D"
-          : CONFIG.mode === "visible" ? "#7C3AED"
-          : ACTIVE_LLM.color;
-        badge.style.background = bg;
-      }
-      // Ensure the reveal toggle button reflects the current mode.
-      if (window.__llmGuard.ui.updateRevealButton) {
-        window.__llmGuard.ui.updateRevealButton(CONFIG.mode === "visible");
+      try {
+        const m = evt.data.mode;
+        if (m === "anonymize" || m === "block" || m === "visible") CONFIG.mode = m;
+        else console.warn("[LLM Guard] modeUpdate: unknown mode received", m);
+        const badge = document.getElementById("llm-guard-badge");
+        if (badge) {
+          badge.title = `LLM Guard — ${ACTIVE_LLM.name} | mode: ${CONFIG.mode} (cliquez pour changer)`;
+          const bg = CONFIG.mode === "block" ? "#A32D2D"
+            : CONFIG.mode === "visible" ? "#7C3AED"
+            : ACTIVE_LLM.color;
+          badge.style.background = bg;
+        }
+        // Ensure the reveal toggle button reflects the current mode.
+        // updateRevealButton(false) will also scrub originals back to
+        // placeholders if the user had revealed them — privacy-critical
+        // when switching visible→anonymize/block.
+        if (window.__llmGuard.ui.updateRevealButton) {
+          window.__llmGuard.ui.updateRevealButton(CONFIG.mode === "visible");
+        }
+      } catch (err) {
+        console.error("[LLM Guard] modeUpdate handler failed", err);
       }
     }
 
@@ -1174,35 +1182,63 @@
   // ui helper, which re-applies the current reveal state (hide by default,
   // show when the user has toggled reveal on).
   let conversationObserver = null;
+  let conversationObservedTarget = null;
   let conversationReapplyScheduled = false;
   function ensureConversationObserver() {
-    if (CONFIG.mode !== "visible") {
-      if (conversationObserver) {
+    try {
+      if (CONFIG.mode !== "visible") {
+        if (conversationObserver) {
+          conversationObserver.disconnect();
+          conversationObserver = null;
+          conversationObservedTarget = null;
+        }
+        return;
+      }
+      // If the previously observed target was removed from the DOM (SPA
+      // route change), drop the stale observer so we re-attach to the
+      // current conversation container.
+      if (conversationObserver && conversationObservedTarget && !conversationObservedTarget.isConnected) {
         conversationObserver.disconnect();
         conversationObserver = null;
+        conversationObservedTarget = null;
       }
-      return;
-    }
-    if (conversationObserver) return;
-    const sel = ACTIVE_LLM.conversationSelector || "main";
-    const target = document.querySelector(sel) || document.body;
-    if (!target) return;
-    conversationObserver = new MutationObserver(() => {
-      if (conversationReapplyScheduled) return;
-      conversationReapplyScheduled = true;
-      // Coalesce streaming bursts — one token can fire many mutations.
-      requestAnimationFrame(() => {
-        conversationReapplyScheduled = false;
-        if (window.__llmGuard.ui.reapplyRevealState) {
-          window.__llmGuard.ui.reapplyRevealState();
-        }
+      if (conversationObserver) return;
+      const sel = ACTIVE_LLM.conversationSelector || "main";
+      let target;
+      try {
+        target = document.querySelector(sel);
+      } catch (err) {
+        console.error("[LLM Guard][reveal] bad conversationSelector", sel, err);
+      }
+      if (!target) target = document.body;
+      if (!target) {
+        console.warn("[LLM Guard][reveal] no conversation target yet; will retry");
+        return;
+      }
+      conversationObserver = new MutationObserver(() => {
+        if (conversationReapplyScheduled) return;
+        conversationReapplyScheduled = true;
+        // Coalesce streaming bursts — one token can fire many mutations.
+        requestAnimationFrame(() => {
+          conversationReapplyScheduled = false;
+          try {
+            if (window.__llmGuard.ui.reapplyRevealState) {
+              window.__llmGuard.ui.reapplyRevealState();
+            }
+          } catch (err) {
+            console.error("[LLM Guard][reveal] reapplyRevealState from observer failed", err);
+          }
+        });
       });
-    });
-    conversationObserver.observe(target, {
-      childList: true,
-      characterData: true,
-      subtree: true,
-    });
+      conversationObserver.observe(target, {
+        childList: true,
+        characterData: true,
+        subtree: true,
+      });
+      conversationObservedTarget = target;
+    } catch (err) {
+      console.error("[LLM Guard][reveal] ensureConversationObserver failed", err);
+    }
   }
   ensureConversationObserver();
   setInterval(ensureConversationObserver, 2000);

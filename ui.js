@@ -245,15 +245,63 @@
   // Only rewrites text inside the conversation container for the active LLM;
   // never touches extension chrome or the whole document. Toggles the DOM in
   // place between placeholders (the default in visible mode) and real values.
-  let revealState = false;
+  //
+  // Robustness notes (points of failure addressed):
+  //   - revealState (user intent) vs. domShowsOriginals (actual DOM state)
+  //     are tracked separately so mode-switches and empty-map clicks never
+  //     desync the toggle from what the user actually sees.
+  //   - Every DOM op is wrapped in try/catch and logs to console so silent
+  //     failures (e.g. shadow-root access, null nodeValue, detached nodes,
+  //     TreeWalker mutation races) are visible during triage.
+  //   - Shadow DOM is traversed recursively; attributes (title/alt/aria-*/
+  //     placeholder) and form field values (textarea/input.value,
+  //     contenteditable subtrees) are rewritten too.
+  //   - reapply is re-entrant-safe: a lock prevents overlapping rewrites
+  //     from the conversation observer clobbering a click-triggered pass.
+  //   - Leaving visible mode while originals are shown reverts the DOM
+  //     back to placeholders (privacy-critical) instead of just flipping
+  //     the state flag.
+  let revealState = false;          // user intent: true = show originals
+  let domShowsOriginals = false;    // actual DOM state: true = originals visible
   let revealButtonRef = null;
+  let rewriteInFlight = false;      // re-entry guard
   // Re-apply hook populated by addRevealToggleButton. Used by the content
   // script's conversation observer to re-enforce the current reveal state
   // whenever the LLM streams new tokens (which would otherwise clobber our
   // in-place DOM rewrite).
   let reapplyRevealFn = null;
+  let revertToPlaceholdersFn = null;
+
+  // Attributes that may contain user-visible PII rendered by the LLM site.
+  const REWRITABLE_ATTRS = ["title", "alt", "aria-label", "placeholder", "value"];
+
+  function isExtensionChrome(el) {
+    // Walk up the parent chain, crossing shadow boundaries, looking for our
+    // own UI. Any element inside our banner/badge/reveal button is excluded
+    // from rewrites so we never mangle our own chrome.
+    let p = el;
+    while (p) {
+      if (p.nodeType === 1) {
+        const id = p.id;
+        if (id === "llm-guard-banner" || id === "llm-guard-badge" || id === "llm-guard-reveal") {
+          return true;
+        }
+      }
+      const parent = p.parentNode;
+      if (parent) { p = parent; continue; }
+      const root = p.getRootNode && p.getRootNode();
+      if (root && root.host && root.host !== p) { p = root.host; continue; }
+      return false;
+    }
+    return false;
+  }
 
   function addRevealToggleButton({ activeLLM, isVisibleMode, anonymizer }) {
+    if (!anonymizer || !anonymizer.anonymizationMap || !anonymizer.reverseMap) {
+      console.error("[LLM Guard][reveal] addRevealToggleButton: missing/invalid anonymizer \u2014 reveal disabled");
+      return;
+    }
+
     const btn = document.createElement("button");
     btn.id = "llm-guard-reveal";
     btn.type = "button";
@@ -279,71 +327,236 @@
     revealButtonRef = btn;
 
     function getConversationRoots() {
-      const sel = activeLLM.conversationSelector || "main";
-      const nodes = document.querySelectorAll(sel);
-      return nodes.length > 0 ? Array.from(nodes) : [document.body];
+      try {
+        const sel = activeLLM.conversationSelector || "main";
+        const nodes = document.querySelectorAll(sel);
+        if (nodes.length > 0) return Array.from(nodes);
+        console.warn("[LLM Guard][reveal] conversation selector matched nothing, falling back to body:", sel);
+      } catch (err) {
+        console.error("[LLM Guard][reveal] getConversationRoots: bad selector", activeLLM.conversationSelector, err);
+      }
+      return document.body ? [document.body] : [];
     }
 
-    function rewriteText(root, forward) {
-      // forward: placeholder -> original. Reverse: original -> placeholder.
-      const forwardMap = anonymizer.anonymizationMap;
-      const reverseMap = anonymizer.reverseMap;
-      if (forwardMap.size === 0) return;
-
-      const walker = document.createTreeWalker(root, NodeFilter.SHOW_TEXT, {
-        acceptNode(node) {
-          // Skip text inside the extension UI to avoid rewriting our own chrome.
-          let p = node.parentElement;
-          while (p) {
-            if (p.id === "llm-guard-banner" || p.id === "llm-guard-badge" || p.id === "llm-guard-reveal") {
-              return NodeFilter.FILTER_REJECT;
-            }
-            p = p.parentElement;
+    // Collect text nodes from a root, recursively descending into shadow
+    // roots. Captures nodes before mutation so iteration isn't perturbed by
+    // the rewrite itself (or by concurrent streaming mutations).
+    function collectTextNodes(root, out) {
+      if (!root) return;
+      try {
+        if (root.nodeType === 1 && isExtensionChrome(root)) return;
+        const walker = document.createTreeWalker(root, NodeFilter.SHOW_TEXT, {
+          acceptNode(node) {
+            return isExtensionChrome(node.parentNode) ? NodeFilter.FILTER_REJECT : NodeFilter.FILTER_ACCEPT;
+          },
+        });
+        let n;
+        while ((n = walker.nextNode())) out.push(n);
+      } catch (err) {
+        console.error("[LLM Guard][reveal] collectTextNodes: walker failed", err);
+      }
+      // Shadow DOM: TreeWalker doesn't cross shadow boundaries, so we
+      // descend manually. Closed shadow roots are unreachable by design.
+      try {
+        const hosts = root.querySelectorAll ? root.querySelectorAll("*") : [];
+        for (const host of hosts) {
+          if (host.shadowRoot && !isExtensionChrome(host)) {
+            collectTextNodes(host.shadowRoot, out);
           }
-          return NodeFilter.FILTER_ACCEPT;
-        },
-      });
-      const nodes = [];
-      let n;
-      while ((n = walker.nextNode())) nodes.push(n);
-
-      if (forward) {
-        // placeholder -> original. Longest first to avoid nested substrings.
-        const entries = Array.from(forwardMap.entries()).sort((a, b) => b[0].length - a[0].length);
-        for (const node of nodes) {
-          let t = node.nodeValue;
-          let changed = false;
-          for (const [placeholder, original] of entries) {
-            if (t.indexOf(placeholder) === -1) continue;
-            t = t.split(placeholder).join(original);
-            changed = true;
-          }
-          if (changed) node.nodeValue = t;
         }
-      } else {
-        // original -> placeholder. Longest originals first.
-        const entries = Array.from(reverseMap.entries()).sort((a, b) => b[0].length - a[0].length);
-        for (const node of nodes) {
-          let t = node.nodeValue;
-          let changed = false;
-          for (const [original, placeholder] of entries) {
-            if (t.indexOf(original) === -1) continue;
-            t = t.split(original).join(placeholder);
-            changed = true;
-          }
-          if (changed) node.nodeValue = t;
-        }
+      } catch (err) {
+        console.error("[LLM Guard][reveal] collectTextNodes: shadow traversal failed", err);
       }
     }
 
+    function collectAttrTargets(root, out) {
+      if (!root || !root.querySelectorAll) return;
+      try {
+        const selector = REWRITABLE_ATTRS.map((a) => `[${a}]`).join(",");
+        const els = root.querySelectorAll(selector);
+        for (const el of els) {
+          if (!isExtensionChrome(el)) out.push(el);
+        }
+      } catch (err) {
+        console.error("[LLM Guard][reveal] collectAttrTargets failed", err);
+      }
+      try {
+        const all = root.querySelectorAll ? root.querySelectorAll("*") : [];
+        for (const host of all) {
+          if (host.shadowRoot && !isExtensionChrome(host)) {
+            collectAttrTargets(host.shadowRoot, out);
+          }
+        }
+      } catch (err) {
+        console.error("[LLM Guard][reveal] collectAttrTargets: shadow traversal failed", err);
+      }
+    }
+
+    function collectFormFields(root, out) {
+      if (!root || !root.querySelectorAll) return;
+      try {
+        const els = root.querySelectorAll(
+          'textarea, input[type="text"], input[type="search"], input:not([type]), [contenteditable="true"], [contenteditable=""]'
+        );
+        for (const el of els) {
+          if (!isExtensionChrome(el)) out.push(el);
+        }
+      } catch (err) {
+        console.error("[LLM Guard][reveal] collectFormFields failed", err);
+      }
+      try {
+        const all = root.querySelectorAll ? root.querySelectorAll("*") : [];
+        for (const host of all) {
+          if (host.shadowRoot && !isExtensionChrome(host)) {
+            collectFormFields(host.shadowRoot, out);
+          }
+        }
+      } catch (err) {
+        console.error("[LLM Guard][reveal] collectFormFields: shadow traversal failed", err);
+      }
+    }
+
+    function applyReplacements(text, entries) {
+      if (typeof text !== "string" || text.length === 0) return { text, changed: false };
+      let out = text;
+      let changed = false;
+      for (const [needle, replacement] of entries) {
+        if (!needle || out.indexOf(needle) === -1) continue;
+        try {
+          out = out.split(needle).join(replacement);
+          changed = true;
+        } catch (err) {
+          console.error("[LLM Guard][reveal] applyReplacements split/join failed", { needle, err });
+        }
+      }
+      return { text: out, changed };
+    }
+
+    // Core rewrite pass. `forward=true` swaps placeholders\u2192originals
+    // (reveal), `forward=false` swaps originals\u2192placeholders (hide).
+    function rewriteText(root, forward) {
+      const forwardMap = anonymizer.anonymizationMap;
+      const reverseMap = anonymizer.reverseMap;
+      if (!forwardMap || !reverseMap) {
+        console.error("[LLM Guard][reveal] rewriteText: anonymizer maps missing");
+        return 0;
+      }
+      if (forwardMap.size === 0) return 0;
+
+      const sourceMap = forward ? forwardMap : reverseMap;
+      // Sort by key length DESC so longer matches win (e.g. an email
+      // placeholder doesn't get partially eaten by a shorter name match).
+      const entries = Array.from(sourceMap.entries()).sort((a, b) => b[0].length - a[0].length);
+      let changes = 0;
+
+      // 1. Text nodes (including shadow DOM descendants).
+      const textNodes = [];
+      collectTextNodes(root, textNodes);
+      for (const node of textNodes) {
+        try {
+          const val = node.nodeValue;
+          if (typeof val !== "string" || val.length === 0) continue;
+          const res = applyReplacements(val, entries);
+          if (res.changed) { node.nodeValue = res.text; changes++; }
+        } catch (err) {
+          console.error("[LLM Guard][reveal] rewriteText: text node update failed", err);
+        }
+      }
+
+      // 2. Attributes (title/alt/aria-label/placeholder/value on elements).
+      const attrTargets = [];
+      collectAttrTargets(root, attrTargets);
+      for (const el of attrTargets) {
+        for (const attr of REWRITABLE_ATTRS) {
+          try {
+            if (!el.hasAttribute || !el.hasAttribute(attr)) continue;
+            const val = el.getAttribute(attr);
+            const res = applyReplacements(val, entries);
+            if (res.changed) { el.setAttribute(attr, res.text); changes++; }
+          } catch (err) {
+            console.error("[LLM Guard][reveal] rewriteText: attr update failed", { attr, err });
+          }
+        }
+      }
+
+      // 3. Form field live .value (textarea/input). Contenteditable children
+      // are already covered by the text-node pass above. Uses the native
+      // setter so React-controlled inputs see the change.
+      const formFields = [];
+      collectFormFields(root, formFields);
+      for (const el of formFields) {
+        try {
+          const tag = el.tagName;
+          if (tag !== "TEXTAREA" && tag !== "INPUT") continue;
+          const val = el.value;
+          const res = applyReplacements(val, entries);
+          if (!res.changed) continue;
+          const proto = tag === "TEXTAREA"
+            ? (window.HTMLTextAreaElement && window.HTMLTextAreaElement.prototype)
+            : (window.HTMLInputElement && window.HTMLInputElement.prototype);
+          const desc = proto && Object.getOwnPropertyDescriptor(proto, "value");
+          if (desc && desc.set) desc.set.call(el, res.text);
+          else el.value = res.text;
+          changes++;
+        } catch (err) {
+          console.error("[LLM Guard][reveal] rewriteText: form field update failed", err);
+        }
+      }
+
+      return changes;
+    }
+
+    function rewriteAllRoots(forward) {
+      if (rewriteInFlight) return 0;
+      rewriteInFlight = true;
+      let total = 0;
+      try {
+        const roots = getConversationRoots();
+        if (roots.length === 0) {
+          console.warn("[LLM Guard][reveal] rewriteAllRoots: no roots to rewrite");
+        }
+        for (const r of roots) {
+          try {
+            total += rewriteText(r, forward) || 0;
+          } catch (err) {
+            console.error("[LLM Guard][reveal] rewriteAllRoots: per-root rewrite failed", err);
+          }
+        }
+      } finally {
+        rewriteInFlight = false;
+      }
+      return total;
+    }
+
+    function setButtonAppearance(revealed) {
+      if (!revealButtonRef) return;
+      revealButtonRef.textContent = revealed
+        ? "\u{1F441}\u200d\u{1F5E8} Masquer les PII"
+        : "\u{1F441} R\u00e9v\u00e9ler les PII";
+      revealButtonRef.setAttribute("aria-pressed", revealed ? "true" : "false");
+      revealButtonRef.style.background = revealed ? "#3b1a6e" : "#1a1430";
+    }
+
     btn.addEventListener("click", () => {
-      if (!isVisibleMode()) return;
-      const roots = getConversationRoots();
-      revealState = !revealState;
-      for (const r of roots) rewriteText(r, revealState);
-      btn.textContent = revealState ? "\u{1F441}\u200d\u{1F5E8} Masquer les PII" : "\u{1F441} R\u00e9v\u00e9ler les PII";
-      btn.setAttribute("aria-pressed", revealState ? "true" : "false");
-      btn.style.background = revealState ? "#3b1a6e" : "#1a1430";
+      try {
+        if (!isVisibleMode()) {
+          console.warn("[LLM Guard][reveal] click ignored: not in visible mode");
+          return;
+        }
+        if (anonymizer.anonymizationMap.size === 0) {
+          // No mappings yet \u2014 flipping state would just confuse the user.
+          console.info("[LLM Guard][reveal] click ignored: no PII mappings to toggle");
+          return;
+        }
+        const nextState = !revealState;
+        const changes = rewriteAllRoots(nextState);
+        revealState = nextState;
+        domShowsOriginals = nextState;
+        setButtonAppearance(revealState);
+        console.info(`[LLM Guard][reveal] toggled reveal=${revealState} (rewrote ${changes} target(s))`);
+      } catch (err) {
+        console.error("[LLM Guard][reveal] click handler failed", err);
+      }
     });
 
     // Publish the reapply hook. content.js calls this from a conversation
@@ -351,16 +564,39 @@
     // and so the user's own message bubble (rendered by the LLM site from
     // raw input) gets rewritten to placeholders in visible mode.
     reapplyRevealFn = () => {
-      if (!isVisibleMode()) return;
-      const roots = getConversationRoots();
-      for (const r of roots) rewriteText(r, revealState);
+      try {
+        if (!isVisibleMode()) return;
+        if (anonymizer.anonymizationMap.size === 0) return;
+        rewriteAllRoots(revealState);
+        domShowsOriginals = revealState;
+      } catch (err) {
+        console.error("[LLM Guard][reveal] reapply failed", err);
+      }
+    };
+
+    // When leaving visible mode we must force the DOM back to placeholders
+    // if the user had revealed originals \u2014 otherwise a mode-switch leaks
+    // real PII in the rendered conversation until the next scroll/refresh.
+    revertToPlaceholdersFn = () => {
+      try {
+        if (!domShowsOriginals) return;
+        const changes = rewriteAllRoots(false);
+        domShowsOriginals = false;
+        console.info(`[LLM Guard][reveal] reverted DOM to placeholders on mode exit (${changes} change(s))`);
+      } catch (err) {
+        console.error("[LLM Guard][reveal] revertToPlaceholders failed", err);
+      }
     };
 
     function mount() {
-      if (document.body && !document.getElementById("llm-guard-reveal")) {
-        document.body.appendChild(btn);
+      try {
+        if (document.body && !document.getElementById("llm-guard-reveal")) {
+          document.body.appendChild(btn);
+        }
+        updateRevealButton(isVisibleMode());
+      } catch (err) {
+        console.error("[LLM Guard][reveal] mount failed", err);
       }
-      updateRevealButton(isVisibleMode());
     }
     if (document.body) mount();
     else document.addEventListener("DOMContentLoaded", mount);
@@ -369,21 +605,35 @@
   // Re-mount the reveal button if an SPA removed it, and re-enforce the
   // current reveal state. Called from content.js on conversation mutations.
   function reapplyRevealState() {
-    if (revealButtonRef && document.body && !document.body.contains(revealButtonRef)) {
-      document.body.appendChild(revealButtonRef);
+    try {
+      if (revealButtonRef && document.body && !document.body.contains(revealButtonRef)) {
+        document.body.appendChild(revealButtonRef);
+      }
+      if (typeof reapplyRevealFn === "function") reapplyRevealFn();
+    } catch (err) {
+      console.error("[LLM Guard][reveal] reapplyRevealState failed", err);
     }
-    if (typeof reapplyRevealFn === "function") reapplyRevealFn();
   }
 
   function updateRevealButton(show) {
     if (!revealButtonRef) return;
-    revealButtonRef.style.display = show ? "inline-block" : "none";
-    if (!show) {
-      // Reset state when leaving visible mode so next entry starts hidden.
-      revealState = false;
-      revealButtonRef.textContent = "\u{1F441} R\u00e9v\u00e9ler les PII";
-      revealButtonRef.setAttribute("aria-pressed", "false");
-      revealButtonRef.style.background = "#1a1430";
+    try {
+      revealButtonRef.style.display = show ? "inline-block" : "none";
+      if (!show) {
+        // Privacy-critical: if the user had revealed originals and is now
+        // leaving visible mode, the DOM must be swept back to placeholders
+        // before we reset our state flag \u2014 otherwise reveal\u2192mode-switch\u2192
+        // mode-switch-back desyncs the toggle from the actual DOM.
+        if (typeof revertToPlaceholdersFn === "function") {
+          revertToPlaceholdersFn();
+        }
+        revealState = false;
+        revealButtonRef.textContent = "\u{1F441} R\u00e9v\u00e9ler les PII";
+        revealButtonRef.setAttribute("aria-pressed", "false");
+        revealButtonRef.style.background = "#1a1430";
+      }
+    } catch (err) {
+      console.error("[LLM Guard][reveal] updateRevealButton failed", err);
     }
   }
 
