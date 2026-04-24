@@ -32,7 +32,7 @@ async function getConfig() {
   const r = await chrome.storage.local.get([TELEMETRY_CONFIG_KEY]);
   return r[TELEMETRY_CONFIG_KEY] || {
     enabled: false,
-    backendUrl: "",
+    backendUrl: "https://localhost/api",
     deviceToken: "",
     deviceId: "",
     orgId: "",

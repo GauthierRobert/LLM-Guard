@@ -96,8 +96,8 @@
       <div class="section-title">Backend</div>
       <label>
         <span class="lbl">URL du backend</span>
-        <input type="url" id="opt-backend-url" placeholder="https://localhost" autocomplete="off">
-        <span class="hint">Endpoint HTTPS de votre instance auto-hébergée (ex. <code>https://localhost</code> ou <code>https://llm-guard.local</code>). Les évènements sont envoyés à <code>&lt;URL&gt;/v1/events</code>. Nécessite que l'autorité racine <code>infra/certs/llm-guard-ca.crt</code> soit approuvée par le système.</span>
+        <input type="url" id="opt-backend-url" placeholder="https://localhost/api" autocomplete="off">
+        <span class="hint">Endpoint HTTPS de votre instance auto-hébergée (ex. <code>https://localhost/api</code> ou <code>https://llm-guard.local/api</code>). Avec le reverse-proxy Caddy fourni dans <code>infra/</code>, l'API est exposée sous le préfixe <code>/api</code> — les évènements sont envoyés à <code>&lt;URL&gt;/v1/events</code>. Nécessite que l'autorité racine <code>infra/certs/llm-guard-ca.crt</code> soit approuvée par le système.</span>
       </label>
       <label>
         <span class="lbl">Jeton de l'appareil</span>

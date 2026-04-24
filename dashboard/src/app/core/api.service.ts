@@ -1,6 +1,6 @@
 import { HttpClient } from '@angular/common/http';
 import { Injectable, inject } from '@angular/core';
-import { Observable } from 'rxjs';
+import { Observable, map } from 'rxjs';
 
 import { LLMGuardEvent, StatsResponse } from './schema.generated';
 
@@ -22,7 +22,19 @@ export class ApiService {
   private readonly base = '/api';
 
   stats(range: TimeRange = '24h'): Observable<StatsResponse> {
-    return this.http.get<StatsResponse>(`${this.base}/v1/stats`, { params: { range } });
+    return this.http
+      .get<Partial<StatsResponse>>(`${this.base}/v1/stats`, { params: { range } })
+      .pipe(
+        map((s) => ({
+          total: s.total ?? 0,
+          clean: s.clean ?? 0,
+          flagged: s.flagged ?? 0,
+          blocked: s.blocked ?? 0,
+          anonymized: s.anonymized ?? 0,
+          by_llm: s.by_llm ?? {},
+          by_type: s.by_type ?? {},
+        })),
+      );
   }
 
   events(params: { limit?: number; offset?: number; severity?: string; llm?: string; action?: string; range?: TimeRange } = {}): Observable<{

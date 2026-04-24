@@ -70,7 +70,17 @@ export class ComplianceService {
 
   // Zero stats when the backend hasn't responded yet (or is empty). Downstream
   // views check `hasData()` to decide whether to render an empty-state banner.
-  readonly stats = computed<StatsResponse>(() => this._stats() ?? EMPTY_STATS);
+  // Also backfill `by_type`/`by_llm` so downstream code can index them safely
+  // even if the API omits the fields.
+  readonly stats = computed<StatsResponse>(() => {
+    const raw = this._stats();
+    if (!raw) return EMPTY_STATS;
+    return {
+      ...raw,
+      by_llm: raw.by_llm ?? {},
+      by_type: raw.by_type ?? {},
+    };
+  });
   readonly events = this._events.asReadonly();
   readonly loaded = this._loaded.asReadonly();
   readonly hasData = computed<boolean>(() => (this._stats()?.total ?? 0) > 0);

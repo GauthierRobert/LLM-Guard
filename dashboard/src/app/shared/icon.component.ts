@@ -27,7 +27,8 @@ export type IconName =
   | 'policy'
   | 'close'
   | 'check'
-  | 'chevron_right';
+  | 'chevron_right'
+  | 'pie_chart';
 
 /**
  * Inline SVG icon set. No external font, no Material Icons dependency.
@@ -181,6 +182,10 @@ export type IconName =
       }
       @case ('chevron_right') {
         <path d="m9 6 6 6-6 6"/>
+      }
+      @case ('pie_chart') {
+        <path d="M12 3a9 9 0 1 0 9 9h-9Z"/>
+        <path d="M14 3a7 7 0 0 1 7 7h-7Z"/>
       }
     }
   </svg>`,

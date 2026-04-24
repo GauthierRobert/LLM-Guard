@@ -35,7 +35,31 @@
       "Bash(curl -fsS http://localhost/api/v1/health)",
       "Bash(rm -f package-lock.json)",
       "Bash(npm install *)",
-      "Bash(npx ng *)"
+      "Bash(npx ng *)",
+      "Bash(npx tsc *)",
+      "Bash(curl -k -v https://localhost/v1/health)",
+      "Bash(python -m json.tool)",
+      "Bash(curl -sk -o /dev/null -w \"HTTP %{http_code}\\\\n\" https://localhost/v1/health)",
+      "Bash(curl -sk https://localhost/v1/health)",
+      "Bash(curl -sk -o /dev/null -w \"HTTP %{http_code}\\\\n\" https://localhost/api/v1/health)",
+      "Bash(curl -sk https://localhost/api/v1/health)",
+      "Bash(curl *)",
+      "mcp__plugin_playwright_playwright__browser_resize",
+      "mcp__plugin_playwright_playwright__browser_navigate",
+      "mcp__plugin_playwright_playwright__browser_wait_for",
+      "mcp__plugin_playwright_playwright__browser_take_screenshot",
+      "mcp__plugin_playwright_playwright__browser_console_messages",
+      "mcp__plugin_playwright_playwright__browser_close",
+      "Bash(node scripts/build-world-paths.js /tmp/ne_110m.geojson 1.2)",
+      "Bash(rm scripts/.world_12.txt)",
+      "Bash(npx --no-install tsc --noEmit -p tsconfig.json)",
+      "Bash(taskkill //F //IM node.exe //FI \"WINDOWTITLE eq .serve.js\")",
+      "Bash(pkill -f \".serve.js\")",
+      "Bash(rm -f .serve.js .map-preview.html .http.log .playwright-mcp/world-map-preview.png)",
+      "Bash(rmdir .playwright-mcp)",
+      "Bash(netstat -ano)",
+      "Bash(tasklist)",
+      "Bash(taskkill //F //PID 33224)"
     ]
   }
 }

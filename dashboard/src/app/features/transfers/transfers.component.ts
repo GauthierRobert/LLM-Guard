@@ -1,6 +1,7 @@
 import { Component, computed, inject } from '@angular/core';
 
 import { ComplianceService } from '../../core/compliance.service';
+import { WORLD_PATH_D } from './world-paths';
 
 const ADEQ_CHIP: Record<string, string> = {
   adequate:     'bg-clean-900 text-brand-300',
@@ -53,26 +54,67 @@ const ADEQ_LABEL: Record<string, string> = {
 
     <div class="bg-ink-800 border border-ink-700 rounded-xl p-5 mb-4">
       <h2 class="text-[14px] font-semibold text-ink-50 mb-3">Destinations observées</h2>
-      <div class="bg-ink-900 border border-ink-700 rounded-lg overflow-hidden" aria-label="Planisphère des destinations LLM">
-        <svg viewBox="0 0 800 360" class="w-full h-auto block">
-          <rect x="0" y="0" width="800" height="360" fill="#0e0f11"/>
-          <path d="M 70,130 Q 120,90 180,110 Q 230,130 250,170 Q 240,210 200,230 Q 150,240 110,220 Q 70,200 70,130 Z" fill="#14151a" stroke="#1e1f23"/>
-          <path d="M 180,250 Q 210,250 230,290 Q 220,330 200,335 Q 180,320 175,285 Z" fill="#14151a" stroke="#1e1f23"/>
-          <path d="M 320,100 Q 380,80 430,110 Q 460,130 450,160 Q 420,170 390,155 Q 350,145 320,135 Z" fill="#14151a" stroke="#1e1f23"/>
-          <path d="M 420,150 Q 470,140 510,170 Q 520,220 490,240 Q 450,245 425,230 Q 410,200 420,150 Z" fill="#14151a" stroke="#1e1f23"/>
-          <path d="M 470,90 Q 580,75 680,110 Q 720,150 700,200 Q 640,230 560,225 Q 510,210 480,180 Z" fill="#14151a" stroke="#1e1f23"/>
-          <path d="M 640,240 Q 680,240 700,280 Q 690,310 660,310 Q 640,285 635,255 Z" fill="#14151a" stroke="#1e1f23"/>
-          <line x1="0" y1="180" x2="800" y2="180" stroke="#1e1f23" stroke-dasharray="4 6"/>
-          <text x="12" y="174" fill="#3f3e3a" font-size="9">Équateur</text>
-          <ellipse cx="420" cy="130" rx="70" ry="32" fill="rgba(15, 110, 86, 0.15)" stroke="#0F6E56" stroke-dasharray="4 4"/>
-          <text x="420" y="95" fill="#5DCAA5" font-size="10" text-anchor="middle" font-weight="600">Zone UE/EEE</text>
+      <div class="border border-ink-700 rounded-lg overflow-hidden" aria-label="Planisphère des destinations LLM">
+        <svg viewBox="0 0 800 360" class="w-full h-auto block" preserveAspectRatio="xMidYMid meet">
+          <defs>
+            <radialGradient id="ocean" cx="0.5" cy="0.55" r="0.75">
+              <stop offset="0%"   stop-color="#0f1d2e"/>
+              <stop offset="55%"  stop-color="#0a1320"/>
+              <stop offset="100%" stop-color="#05090f"/>
+            </radialGradient>
+            <linearGradient id="land" x1="0" y1="0" x2="0" y2="1">
+              <stop offset="0%"   stop-color="#233042"/>
+              <stop offset="55%"  stop-color="#1c2838"/>
+              <stop offset="100%" stop-color="#16202c"/>
+            </linearGradient>
+            <filter id="landShadow" x="-5%" y="-5%" width="110%" height="115%">
+              <feGaussianBlur in="SourceAlpha" stdDeviation="0.8"/>
+              <feOffset dx="0" dy="0.6" result="offsetBlur"/>
+              <feComponentTransfer><feFuncA type="linear" slope="0.55"/></feComponentTransfer>
+              <feMerge><feMergeNode/><feMergeNode in="SourceGraphic"/></feMerge>
+            </filter>
+          </defs>
+
+          <rect x="0" y="0" width="800" height="360" fill="url(#ocean)"/>
+
+          <g stroke="#152232" stroke-width="0.35" fill="none" opacity="0.55">
+            <line x1="133.3" y1="0" x2="133.3" y2="360"/>
+            <line x1="266.7" y1="0" x2="266.7" y2="360"/>
+            <line x1="400"   y1="0" x2="400"   y2="360"/>
+            <line x1="533.3" y1="0" x2="533.3" y2="360"/>
+            <line x1="666.7" y1="0" x2="666.7" y2="360"/>
+            <line x1="0" y1="60"  x2="800" y2="60"/>
+            <line x1="0" y1="120" x2="800" y2="120"/>
+            <line x1="0" y1="240" x2="800" y2="240"/>
+            <line x1="0" y1="300" x2="800" y2="300"/>
+          </g>
+
+          <line x1="0" y1="180" x2="800" y2="180" stroke="#1a2838" stroke-dasharray="3 5" stroke-width="0.6"/>
+          <text x="8" y="176" fill="#2e4258" font-size="8" font-family="Inter, sans-serif">Équateur</text>
+
+          <path [attr.d]="worldPath"
+                fill="url(#land)"
+                stroke="#34475e"
+                stroke-width="0.35"
+                stroke-linejoin="round"
+                stroke-linecap="round"
+                fill-rule="evenodd"
+                filter="url(#landShadow)"/>
+
+          <!-- EU/EEA zone (covers Western + Central Europe on the Natural Earth projection) -->
+          <ellipse cx="422" cy="70" rx="48" ry="22"
+                   fill="rgba(93, 202, 165, 0.10)"
+                   stroke="#0F6E56" stroke-dasharray="3 3" stroke-width="1"/>
+          <text x="422" y="42" fill="#5DCAA5" font-size="10" text-anchor="middle"
+                font-weight="600" font-family="Inter, sans-serif">UE / EEE</text>
 
           @for (p of pins(); track p.llm) {
             <g [attr.transform]="'translate(' + p.x + ',' + p.y + ')'">
-              <circle [attr.r]="p.radius" [attr.fill]="p.color" fill-opacity="0.25"/>
-              <circle r="5" [attr.fill]="p.color" stroke="#0e0f11" stroke-width="1.5"/>
-              <text x="9" y="-8" fill="#e1f5ee" font-size="11" font-weight="600">{{ p.llm }}</text>
-              <text x="9" y="5" fill="#888780" font-size="9">{{ p.country }} · {{ p.usageCount }}</text>
+              <circle [attr.r]="p.radius"        [attr.fill]="p.color" fill-opacity="0.14"/>
+              <circle [attr.r]="p.radius * 0.55" [attr.fill]="p.color" fill-opacity="0.28"/>
+              <circle r="4" [attr.fill]="p.color" stroke="#0b1422" stroke-width="1.5"/>
+              <text x="8" y="-6" fill="#e1f5ee" font-size="11" font-weight="600" font-family="Inter, sans-serif" style="paint-order: stroke; stroke: #0b1422; stroke-width: 3px;">{{ p.llm }}</text>
+              <text x="8" y="6"  fill="#9c9b93" font-size="9"  font-family="Inter, sans-serif" style="paint-order: stroke; stroke: #0b1422; stroke-width: 3px;">{{ p.country }} · {{ p.usageCount }}</text>
             </g>
           }
         </svg>
@@ -118,6 +160,8 @@ const ADEQ_LABEL: Record<string, string> = {
 })
 export class TransfersComponent {
   private readonly svc = inject(ComplianceService);
+
+  protected readonly worldPath = WORLD_PATH_D;
 
   protected readonly rows = computed(() => this.svc.transferRows());
 
