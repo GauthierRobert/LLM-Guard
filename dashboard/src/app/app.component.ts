@@ -80,6 +80,7 @@ export class AppComponent {
       label: 'Supervision',
       items: [
         { path: '/overview', label: 'Vue d’ensemble', icon: 'dashboard' },
+        { path: '/stats', label: 'Statistiques', icon: 'pie_chart' },
         { path: '/events', label: 'Évènements', icon: 'list_alt' },
         { path: '/findings', label: 'Détections', icon: 'shield' },
       ],
