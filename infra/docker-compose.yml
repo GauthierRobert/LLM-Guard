@@ -42,7 +42,7 @@ services:
       DEVICE_TOKEN_SECRET: ${DEVICE_TOKEN_SECRET:-change-me-in-prod}
       KEYCLOAK_ISSUER: ${KEYCLOAK_ISSUER:-}
       KEYCLOAK_AUDIENCE: llm-guard-dashboard
-      CORS_ORIGINS: https://localhost,https://llm-guard.local,http://localhost:4200
+      CORS_ORIGINS: https://localhost,https://llm-guard.local,http://localhost:4200,chrome-extension://*
     depends_on:
       postgres:
         condition: service_healthy

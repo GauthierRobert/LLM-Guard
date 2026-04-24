@@ -19,7 +19,9 @@ public class CorsConfig {
                 .map(String::trim)
                 .filter(s -> !s.isEmpty())
                 .toList();
-        cfg.setAllowedOrigins(origins);
+        // setAllowedOriginPatterns (not setAllowedOrigins) so wildcard schemes
+        // like "chrome-extension://*" work alongside allowCredentials=true.
+        cfg.setAllowedOriginPatterns(origins);
         cfg.setAllowedMethods(List.of("GET", "POST", "OPTIONS"));
         cfg.setAllowedHeaders(List.of("Authorization", "Content-Type"));
         cfg.setAllowCredentials(true);

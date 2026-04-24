@@ -5,6 +5,7 @@
   "description": "Intercepte, anonymise et journalise les prompts envoyés aux LLM (ChatGPT, Claude, Gemini, Copilot, Mistral, Perplexity, DeepSeek, Grok) pour la conformité RGPD/AI Act.",
   "permissions": ["storage", "activeTab", "alarms"],
   "host_permissions": [
+    "https://localhost/*",
     "https://chatgpt.com/*",
     "https://chat.openai.com/*",
     "https://claude.ai/*",
