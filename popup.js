@@ -4,7 +4,49 @@ const LLM_COLORS = { ChatGPT: "#10A37F", Claude: "#D97706", Gemini: "#4285F4", C
 const VALID_DOT_CLASSES = ["block", "anon", "warn", "clean"];
 const VALID_SEVERITY_CLASSES = ["critical", "high", "medium", "low"];
 
+// Filter taxonomy for the log list. Each filter maps to the `log.action`
+// tokens the background worker writes; keep this list in sync with
+// background.js::storeLog callers.
+const FILTER_ACTIONS = {
+  all: null,
+  blocked: new Set(["BLOCKED", "ATTACHMENT_BLOCKED"]),
+  flagged: new Set(["PII_DETECTED", "ATTACHMENT_PII_DETECTED", "ATTACHMENT_DETECTED", "ATTACHMENT_UNSCANNED"]),
+  anonymized: new Set(["ANONYMIZED"]),
+};
+
+let cachedLogs = [];
+let currentFilter = "all";
+
+// ─── i18n helpers ───────────────────────────────────────────────
+// chrome.i18n.getMessage is available in extension pages; the __MSG__
+// substitution used in manifest.json only works in the manifest, not in
+// HTML, so we wire up text content here at load time. Fallback to the
+// element's existing text if the locale file doesn't define the key
+// (useful during local development when adding a new string).
+function t(key, substitutions) {
+  try {
+    const msg = chrome.i18n.getMessage(key, substitutions);
+    return msg || "";
+  } catch {
+    return "";
+  }
+}
+
+function applyI18n(root) {
+  root.querySelectorAll("[data-i18n]").forEach((el) => {
+    const key = el.getAttribute("data-i18n");
+    const msg = t(key);
+    if (msg) el.textContent = msg;
+  });
+  root.querySelectorAll("[data-i18n-aria-label]").forEach((el) => {
+    const key = el.getAttribute("data-i18n-aria-label");
+    const msg = t(key);
+    if (msg) el.setAttribute("aria-label", msg);
+  });
+}
+
 document.addEventListener("DOMContentLoaded", () => {
+  applyI18n(document);
   loadStats(); loadLogs(); loadMode(); loadSyncStatus();
   document.getElementById("btn-clear").addEventListener("click", clearLogs);
   document.getElementById("btn-export").addEventListener("click", exportLogs);
@@ -12,6 +54,9 @@ document.addEventListener("DOMContentLoaded", () => {
   document.getElementById("btn-dashboard").addEventListener("click", openDashboard);
   document.querySelectorAll(".mode-btn").forEach(b =>
     b.addEventListener("click", () => setMode(b.dataset.mode))
+  );
+  document.querySelectorAll(".log-filter").forEach(b =>
+    b.addEventListener("click", () => setFilter(b.dataset.filter))
   );
 });
 
@@ -39,25 +84,26 @@ function loadSyncStatus() {
       const meta = document.getElementById("sync-meta");
       if (!cfg || !cfg.enabled || !cfg.backendUrl) {
         dot.className = "sync-dot off";
-        text.textContent = "Envoi désactivé";
+        text.textContent = t("syncDisabled");
         meta.textContent = "";
         return;
       }
       const queued = state?.queued || 0;
       if (state?.lastError) {
         dot.className = "sync-dot err";
-        text.textContent = "Erreur d'envoi";
+        text.textContent = t("syncErr");
       } else if (queued > 0) {
         dot.className = "sync-dot pending";
-        text.textContent = "Envoi en attente";
+        text.textContent = t("syncPending");
       } else {
         dot.className = "sync-dot ok";
-        text.textContent = "Synchronisé";
+        text.textContent = t("syncOk");
       }
+      const locale = chrome.i18n.getUILanguage ? chrome.i18n.getUILanguage() : undefined;
       const last = state?.lastSentAt
-        ? new Date(state.lastSentAt).toLocaleTimeString("fr-FR", { hour: "2-digit", minute: "2-digit" })
+        ? new Date(state.lastSentAt).toLocaleTimeString(locale, { hour: "2-digit", minute: "2-digit" })
         : "—";
-      meta.textContent = `${queued} en file • ${last}`;
+      meta.textContent = t("queueLabel", [String(queued), last]) || `${queued} • ${last}`;
     });
   });
 }
@@ -81,7 +127,7 @@ function buildLlmRow(name, data, maxTotal) {
   const fillClean = document.createElement("div");
   fillClean.className = "llm-bar-fill";
   fillClean.style.width = ((data.clean / maxTotal) * 100) + "%";
-  fillClean.style.background = "#5DCAA5";
+  fillClean.style.background = "#6FD8B4";
   fillClean.style.opacity = "0.6";
 
   const fillTotal = document.createElement("div");
@@ -134,31 +180,41 @@ function buildPiiRow(type, count, maxCount) {
   return row;
 }
 
+function dotClassForAction(action) {
+  if (action === "BLOCKED" || action === "ATTACHMENT_BLOCKED") return "block";
+  if (action === "ANONYMIZED") return "anon";
+  if (action === "PII_DETECTED" || action === "ATTACHMENT_PII_DETECTED" ||
+      action === "ATTACHMENT_DETECTED" || action === "ATTACHMENT_UNSCANNED") return "warn";
+  return "clean";
+}
+
 /** Build a single log entry using safe DOM construction */
 function buildLogEntry(log) {
   const action = log.action || "";
-  const rawDotClass =
-    action === "BLOCKED" || action === "ATTACHMENT_BLOCKED" ? "block" :
-    action === "ANONYMIZED" ? "anon" :
-    action === "PII_DETECTED" || action === "ATTACHMENT_PII_DETECTED" || action === "ATTACHMENT_DETECTED" || action === "ATTACHMENT_UNSCANNED" ? "warn" :
-    "clean";
+  const rawDotClass = dotClassForAction(action);
   const dotClass = VALID_DOT_CLASSES.includes(rawDotClass) ? rawDotClass : "clean";
 
-  const time = new Date(log.timestamp).toLocaleTimeString("fr-FR", { hour: "2-digit", minute: "2-digit", second: "2-digit" });
+  const locale = chrome.i18n.getUILanguage ? chrome.i18n.getUILanguage() : undefined;
+  const time = new Date(log.timestamp).toLocaleTimeString(locale, { hour: "2-digit", minute: "2-digit", second: "2-digit" });
   const preview = log.anonymizedPreview || log.promptPreview || "";
 
   const entry = document.createElement("div");
   entry.className = "log-entry";
+  entry.setAttribute("role", "button");
+  entry.setAttribute("tabindex", "0");
+  entry.setAttribute("aria-expanded", "false");
+  entry.setAttribute("aria-label", `${action} — ${preview.slice(0, 80)}`);
 
   const dot = document.createElement("div");
   dot.className = "log-dot " + dotClass;
+  dot.setAttribute("aria-hidden", "true");
 
   const textDiv = document.createElement("div");
   textDiv.className = "log-text";
 
   const timeDiv = document.createElement("div");
   timeDiv.className = "log-time";
-  timeDiv.textContent = time + " \u2014 " + (log.action || "");
+  timeDiv.textContent = time + " — " + action;
 
   const promptDiv = document.createElement("div");
   promptDiv.className = "log-prompt";
@@ -191,20 +247,62 @@ function buildLogEntry(log) {
   entry.appendChild(dot);
   entry.appendChild(textDiv);
 
+  // Click/keyboard drill-down: toggles a detail pane with the raw fields.
+  // Built lazily so 25 entries don't all render the dl at once.
+  const toggle = () => {
+    const existing = entry.querySelector(".log-detail");
+    if (existing) {
+      existing.remove();
+      entry.setAttribute("aria-expanded", "false");
+      return;
+    }
+    entry.appendChild(buildDetail(log));
+    entry.setAttribute("aria-expanded", "true");
+  };
+  entry.addEventListener("click", toggle);
+  entry.addEventListener("keydown", (e) => {
+    if (e.key === "Enter" || e.key === " ") { e.preventDefault(); toggle(); }
+  });
+
   return entry;
+}
+
+function buildDetail(log) {
+  const detail = document.createElement("dl");
+  detail.className = "log-detail";
+  detail.setAttribute("aria-label", t("logDetailsAria"));
+  const rows = [
+    ["URL", log.url || "—"],
+    ["Action", log.action || "—"],
+    ["LLM", log.llm || "—"],
+    ["Timestamp", log.timestamp || "—"],
+  ];
+  if (Array.isArray(log.findings) && log.findings.length > 0) {
+    rows.push(["Findings", log.findings.map(f => `${f.type}×${f.count} [${f.severity}]`).join(", ")]);
+  }
+  if (log.promptPreview) rows.push(["Preview", log.promptPreview]);
+  if (log.anonymizedPreview) rows.push(["Anonymized", log.anonymizedPreview]);
+  for (const [k, v] of rows) {
+    const dt = document.createElement("dt"); dt.textContent = k;
+    const dd = document.createElement("dd");
+    const code = document.createElement("code"); code.textContent = String(v);
+    dd.appendChild(code);
+    detail.appendChild(dt); detail.appendChild(dd);
+  }
+  return detail;
 }
 
 function loadStats() {
   chrome.runtime.sendMessage({ source: "llm-guard", type: "getStats" }, (r) => {
     if (!r?.stats) return;
     const s = r.stats;
-    document.getElementById("s-total").textContent = s.totalPrompts;
-    document.getElementById("s-anon").textContent = s.anonymizedPrompts;
-    document.getElementById("s-flag").textContent = s.flaggedPrompts;
-    document.getElementById("s-block").textContent = s.blockedPrompts;
-    document.getElementById("s-att-total").textContent = s.attachmentsScanned || 0;
-    document.getElementById("s-att-flag").textContent = s.attachmentsFlagged || 0;
-    document.getElementById("s-att-block").textContent = s.attachmentsBlocked || 0;
+    setStat("s-total", s.totalPrompts);
+    setStat("s-anon", s.anonymizedPrompts);
+    setStat("s-flag", s.flaggedPrompts);
+    setStat("s-block", s.blockedPrompts);
+    setStat("s-att-total", s.attachmentsScanned || 0);
+    setStat("s-att-flag", s.attachmentsFlagged || 0);
+    setStat("s-att-block", s.attachmentsBlocked || 0);
 
     // LLM bars
     const llmSection = document.getElementById("llm-section");
@@ -234,44 +332,82 @@ function loadStats() {
   });
 }
 
+function setStat(id, value) {
+  const el = document.getElementById(id);
+  el.textContent = String(value);
+  el.removeAttribute("aria-busy");
+}
+
 function loadLogs() {
   chrome.runtime.sendMessage({ source: "llm-guard", type: "getLogs" }, (r) => {
-    const container = document.getElementById("log-list");
-    const logs = r?.logs || [];
-    if (logs.length === 0) {
-      container.textContent = "";
-      const emptyDiv = document.createElement("div");
-      emptyDiv.className = "empty-state";
-      emptyDiv.textContent = "Aucune activit\u00e9 enregistr\u00e9e.";
-      container.appendChild(emptyDiv);
-      return;
-    }
-    container.textContent = "";
-    logs.slice(0, 25).forEach(log => {
-      container.appendChild(buildLogEntry(log));
-    });
+    cachedLogs = r?.logs || [];
+    renderLogs();
   });
+}
+
+function filteredLogs() {
+  const set = FILTER_ACTIONS[currentFilter];
+  if (!set) return cachedLogs;
+  return cachedLogs.filter(l => set.has(l.action));
+}
+
+function renderLogs() {
+  const container = document.getElementById("log-list");
+  const visible = filteredLogs();
+  container.textContent = "";
+  if (visible.length === 0) {
+    const emptyDiv = document.createElement("div");
+    emptyDiv.className = "empty-state";
+    emptyDiv.textContent = t("emptyLog");
+    container.appendChild(emptyDiv);
+    return;
+  }
+  visible.slice(0, 25).forEach(log => {
+    container.appendChild(buildLogEntry(log));
+  });
+}
+
+function setFilter(filter) {
+  if (!(filter in FILTER_ACTIONS)) return;
+  currentFilter = filter;
+  document.querySelectorAll(".log-filter").forEach(b => {
+    const active = b.dataset.filter === filter;
+    b.classList.toggle("active", active);
+    b.setAttribute("aria-selected", active ? "true" : "false");
+  });
+  renderLogs();
 }
 
 function loadMode() {
   chrome.storage.local.get(["guard_mode"], (r) => {
     const raw = r.guard_mode || "anonymize";
     const mode = ["block", "visible", "anonymize"].includes(raw) ? raw : "anonymize";
-    document.querySelectorAll(".mode-btn").forEach(b =>
-      b.classList.toggle("active", b.dataset.mode === mode)
-    );
+    applyModeUI(mode);
   });
+}
+
+function applyModeUI(mode) {
+  document.querySelectorAll(".mode-btn").forEach(b => {
+    const active = b.dataset.mode === mode;
+    b.classList.toggle("active", active);
+    b.setAttribute("aria-checked", active ? "true" : "false");
+  });
+  const badge = document.getElementById("mode-badge");
+  if (badge) {
+    const label = t("mode" + mode.charAt(0).toUpperCase() + mode.slice(1)) || mode;
+    badge.textContent = label;
+    const aria = t("modeActiveBadge", [label]);
+    if (aria) badge.setAttribute("aria-label", aria);
+  }
 }
 
 function setMode(mode) {
   chrome.storage.local.set({ guard_mode: mode });
-  document.querySelectorAll(".mode-btn").forEach(b =>
-    b.classList.toggle("active", b.dataset.mode === mode)
-  );
+  applyModeUI(mode);
 }
 
 function clearLogs() {
-  if (!confirm("Effacer tous les logs et statistiques ?")) return;
+  if (!confirm(t("confirmClear") || "Clear logs?")) return;
   chrome.runtime.sendMessage({ source: "llm-guard", type: "clearLogs" }, () => { loadStats(); loadLogs(); });
 }
 

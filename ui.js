@@ -7,6 +7,119 @@
 (function () {
   "use strict";
 
+  // ─── i18n for MAIN-world UI ──────────────────────────────────────
+  // ui.js runs in the page's MAIN world where chrome.i18n is unreachable,
+  // so we ship a compact dictionary and pick a locale from navigator.language.
+  // Keep in sync with _locales/<lang>/messages.json for popup/options parity.
+  const UI_MESSAGES = {
+    en: {
+      bannerAnonymized: "🛡 ANONYMIZED",
+      bannerAnonymizedDetail: (count, types) => ` — ${count} value(s) replaced by placeholders (${types})`,
+      bannerBlocked: "⛔ BLOCKED",
+      bannerBlockedDetail: (count, types) => ` — ${count} sensitive value(s) detected: ${types}`,
+      bannerBlockedSub: "Submission blocked by security policy.",
+      bannerAttachmentBlocked: "📎 ATTACHMENT BLOCKED",
+      bannerAttachmentDetected: "📎 ATTACHMENT — PII detected",
+      bannerAttachmentDetail: (count, types) => ` — ${count} sensitive value(s): ${types}`,
+      bannerWarn: "⚠️ WARNING",
+      bannerWarnDetail: (count, types) => ` — ${count} sensitive value(s) detected: ${types}`,
+      bannerFile: "File: ",
+      bannerTruncated: "truncated",
+      bannerExtractorUnavailable: "extractor unavailable",
+      bannerPasswordProtected: "password-protected",
+      bannerClose: "Close",
+      bannerCopyAnonymized: "Copy anonymized text",
+      bannerCopied: "✓ Copied",
+      bannerCopyFailed: "⚠ Failed",
+      bannerMarkSafe: "Mark as safe",
+      bannerMarkedSafe: "✓ Added",
+      revealPII: "👁 Reveal PII",
+      hidePII: "👁‍🗨 Hide PII",
+      badgeTitle: (name, mode) => `LLM Guard — ${name} | mode: ${mode} (click to change)`,
+    },
+    fr: {
+      bannerAnonymized: "🛡 ANONYMISÉ",
+      bannerAnonymizedDetail: (count, types) => ` — ${count} donnée(s) remplacée(s) par des placeholders (${types})`,
+      bannerBlocked: "⛔ BLOQUÉ",
+      bannerBlockedDetail: (count, types) => ` — ${count} donnée(s) sensible(s) détectée(s) : ${types}`,
+      bannerBlockedSub: "L'envoi a été bloqué par la politique de sécurité.",
+      bannerAttachmentBlocked: "📎 PIÈCE JOINTE BLOQUÉE",
+      bannerAttachmentDetected: "📎 PIÈCE JOINTE — PII détecté",
+      bannerAttachmentDetail: (count, types) => ` — ${count} donnée(s) sensible(s) : ${types}`,
+      bannerWarn: "⚠️ ATTENTION",
+      bannerWarnDetail: (count, types) => ` — ${count} donnée(s) sensible(s) détectée(s) : ${types}`,
+      bannerFile: "Fichier : ",
+      bannerTruncated: "tronqué",
+      bannerExtractorUnavailable: "extracteur indisponible",
+      bannerPasswordProtected: "protégé par mot de passe",
+      bannerClose: "Fermer",
+      bannerCopyAnonymized: "Copier le texte anonymisé",
+      bannerCopied: "✓ Copié",
+      bannerCopyFailed: "⚠ Échec",
+      bannerMarkSafe: "Marquer comme sûr",
+      bannerMarkedSafe: "✓ Ajouté",
+      revealPII: "👁 Révéler les PII",
+      hidePII: "👁‍🗨 Masquer les PII",
+      badgeTitle: (name, mode) => `LLM Guard — ${name} | mode : ${mode} (cliquez pour changer)`,
+    },
+  };
+  function pickLocale() {
+    try {
+      const lang = (navigator.language || "en").slice(0, 2).toLowerCase();
+      return UI_MESSAGES[lang] ? lang : "en";
+    } catch {
+      return "en";
+    }
+  }
+  const L = UI_MESSAGES[pickLocale()];
+
+  // ─── Dark-mode adaptation ────────────────────────────────────────
+  // Banner colors are tuned against a dark app chrome, but LLM sites can be
+  // either light or dark. For light pages, we fall back to a higher-contrast
+  // palette so the banner stays readable. We sniff once at banner time,
+  // cheap enough to avoid stashing state.
+  function isPageDark() {
+    try {
+      // Prefer the site's explicit scheme hint.
+      if (window.matchMedia && window.matchMedia("(prefers-color-scheme: dark)").matches) {
+        // Still verify against the actual body bg — some sites force light
+        // despite the user's OS preference.
+      }
+      const body = document.body || document.documentElement;
+      if (!body) return true;
+      const bg = getComputedStyle(body).backgroundColor || "";
+      const m = bg.match(/rgba?\(\s*(\d+)\s*,\s*(\d+)\s*,\s*(\d+)/i);
+      if (!m) return true;
+      const [r, g, b] = [+m[1], +m[2], +m[3]];
+      // Rec. 709 luminance; anything < 0.5 we call "dark".
+      const lum = (0.2126 * r + 0.7152 * g + 0.0722 * b) / 255;
+      return lum < 0.5;
+    } catch {
+      return true;
+    }
+  }
+
+  function bannerPalette(action, maxSeverity) {
+    const dark = {
+      critical: { bg: "#501313", border: "#A32D2D", text: "#F7C1C1" },
+      high:     { bg: "#4A1B0C", border: "#993C1D", text: "#F5C4B3" },
+      medium:   { bg: "#412402", border: "#854F0B", text: "#FAC775" },
+      low:      { bg: "#042C53", border: "#185FA5", text: "#B5D4F4" },
+      ok:       { bg: "#04342C", border: "#0F6E56", text: "#9FE1CB" },
+    };
+    const light = {
+      // WCAG AA-compliant against white: border ≥ 3:1, text on bg ≥ 4.5:1.
+      critical: { bg: "#FDECEC", border: "#B91C1C", text: "#7F1D1D" },
+      high:     { bg: "#FEECE1", border: "#C2410C", text: "#7C2D12" },
+      medium:   { bg: "#FEF3C7", border: "#B45309", text: "#78350F" },
+      low:      { bg: "#E0F2FE", border: "#1D4ED8", text: "#1E3A8A" },
+      ok:       { bg: "#DCFCE7", border: "#15803D", text: "#14532D" },
+    };
+    const palette = isPageDark() ? dark : light;
+    if (action === "ANONYMIZED") return palette.ok;
+    return palette[maxSeverity] || palette.low;
+  }
+
   function showBanner(findings, action, mappingCount, activeLLM, config, attachment) {
     const existing = document.getElementById("llm-guard-banner");
     if (existing) existing.remove();
@@ -18,17 +131,7 @@
       "low"
     );
 
-    const colors = {
-      critical: { bg: "#501313", border: "#A32D2D", text: "#F7C1C1" },
-      high: { bg: "#4A1B0C", border: "#993C1D", text: "#F5C4B3" },
-      medium: { bg: "#412402", border: "#854F0B", text: "#FAC775" },
-      low: { bg: "#042C53", border: "#185FA5", text: "#B5D4F4" },
-    };
-
-    const c =
-      action === "ANONYMIZED"
-        ? { bg: "#04342C", border: "#0F6E56", text: "#9FE1CB" }
-        : colors[maxSeverity];
+    const c = bannerPalette(action, maxSeverity);
 
     const totalPII = findings.reduce((s, f) => s + f.count, 0);
     const types = findings.map((f) => f.type).join(", ");
@@ -36,6 +139,12 @@
 
     const banner = document.createElement("div");
     banner.id = "llm-guard-banner";
+    // role=alert so assistive tech announces the banner when it mounts;
+    // block/attachment-block cases are persistent and should be announced
+    // assertively.
+    const isPersistent = action === "BLOCKED" || action === "ATTACHMENT_BLOCKED";
+    banner.setAttribute("role", isPersistent ? "alert" : "status");
+    banner.setAttribute("aria-live", isPersistent ? "assertive" : "polite");
     banner.setAttribute("style", `
       position: fixed; top: 0; left: 0; right: 0; z-index: 999999;
       background: ${c.bg}; border-bottom: 2px solid ${c.border};
@@ -50,33 +159,33 @@
 
     if (action === "ANONYMIZED") {
       const bold = document.createElement("strong");
-      bold.textContent = "\u{1F6E1} ANONYMIS\u00c9";
+      bold.textContent = L.bannerAnonymized;
       msgDiv.appendChild(bold);
-      msgDiv.appendChild(document.createTextNode(` \u2014 ${mappingCount} donn\u00e9e(s) remplac\u00e9e(s) par des placeholders (${types})`));
+      msgDiv.appendChild(document.createTextNode(L.bannerAnonymizedDetail(mappingCount, types)));
     } else if (action === "BLOCKED") {
       const bold = document.createElement("strong");
-      bold.textContent = "\u26D4 BLOQU\u00c9";
+      bold.textContent = L.bannerBlocked;
       msgDiv.appendChild(bold);
-      msgDiv.appendChild(document.createTextNode(` \u2014 ${totalPII} donn\u00e9e(s) sensible(s) d\u00e9tect\u00e9e(s) : ${types}`));
+      msgDiv.appendChild(document.createTextNode(L.bannerBlockedDetail(totalPII, types)));
       msgDiv.appendChild(document.createElement("br"));
       const em = document.createElement("em");
-      em.textContent = "L'envoi a \u00e9t\u00e9 bloqu\u00e9 par la politique de s\u00e9curit\u00e9.";
+      em.textContent = L.bannerBlockedSub;
       msgDiv.appendChild(em);
     } else if (action === "ATTACHMENT_BLOCKED") {
       const bold = document.createElement("strong");
-      bold.textContent = "\u{1F4CE} PI\u00c8CE JOINTE BLOQU\u00c9E";
+      bold.textContent = L.bannerAttachmentBlocked;
       msgDiv.appendChild(bold);
-      msgDiv.appendChild(document.createTextNode(` \u2014 ${totalPII} donn\u00e9e(s) sensible(s) : ${types}`));
+      msgDiv.appendChild(document.createTextNode(L.bannerAttachmentDetail(totalPII, types)));
     } else if (action === "ATTACHMENT_DETECTED" || action === "ATTACHMENT_PII_DETECTED") {
       const bold = document.createElement("strong");
-      bold.textContent = "\u{1F4CE} PI\u00c8CE JOINTE \u2014 PII d\u00e9tect\u00e9";
+      bold.textContent = L.bannerAttachmentDetected;
       msgDiv.appendChild(bold);
-      msgDiv.appendChild(document.createTextNode(` \u2014 ${totalPII} donn\u00e9e(s) sensible(s) : ${types}`));
+      msgDiv.appendChild(document.createTextNode(L.bannerAttachmentDetail(totalPII, types)));
     } else {
       const bold = document.createElement("strong");
-      bold.textContent = "\u26A0\uFE0F ATTENTION";
+      bold.textContent = L.bannerWarn;
       msgDiv.appendChild(bold);
-      msgDiv.appendChild(document.createTextNode(` \u2014 ${totalPII} donn\u00e9e(s) sensible(s) d\u00e9tect\u00e9e(s) : ${types}`));
+      msgDiv.appendChild(document.createTextNode(L.bannerWarnDetail(totalPII, types)));
     }
 
     if (isAttachment && attachment) {
@@ -85,10 +194,10 @@
       const parts = [];
       if (attachment.filename) parts.push(attachment.filename);
       if (attachment.sizeBytes) parts.push(humanBytes(attachment.sizeBytes));
-      if (attachment.truncated) parts.push("tronqu\u00e9");
-      if (attachment.unavailable) parts.push("extracteur indisponible");
-      if (attachment.passwordProtected) parts.push("prot\u00e9g\u00e9 par mot de passe");
-      sub.textContent = "Fichier : " + parts.join(" \u00b7 ");
+      if (attachment.truncated) parts.push(L.bannerTruncated);
+      if (attachment.unavailable) parts.push(L.bannerExtractorUnavailable);
+      if (attachment.passwordProtected) parts.push(L.bannerPasswordProtected);
+      sub.textContent = L.bannerFile + parts.join(" \u00b7 ");
       msgDiv.appendChild(sub);
     }
 
@@ -100,7 +209,8 @@
     llmSpan.textContent = activeLLM.name;
 
     const closeBtn = document.createElement("button");
-    closeBtn.textContent = "Fermer";
+    closeBtn.textContent = L.bannerClose;
+    closeBtn.setAttribute("aria-label", L.bannerClose);
     closeBtn.setAttribute("style", `background:none;border:1px solid ${c.border};color:${c.text};padding:4px 12px;border-radius:4px;cursor:pointer;font-size:13px;white-space:nowrap`);
     closeBtn.addEventListener("click", () => banner.remove());
 
@@ -108,15 +218,15 @@
 
     if (isAttachment && attachment && attachment.anonymizedText) {
       const copyBtn = document.createElement("button");
-      copyBtn.textContent = "Copier le texte anonymis\u00e9";
+      copyBtn.textContent = L.bannerCopyAnonymized;
       copyBtn.setAttribute("style", `background:none;border:1px solid ${c.border};color:${c.text};padding:4px 12px;border-radius:4px;cursor:pointer;font-size:13px;white-space:nowrap`);
       copyBtn.addEventListener("click", async () => {
         try {
           await navigator.clipboard.writeText(attachment.anonymizedText);
-          copyBtn.textContent = "\u2713 Copi\u00e9";
-          setTimeout(() => { copyBtn.textContent = "Copier le texte anonymis\u00e9"; }, 2000);
+          copyBtn.textContent = L.bannerCopied;
+          setTimeout(() => { copyBtn.textContent = L.bannerCopyAnonymized; }, 2000);
         } catch {
-          copyBtn.textContent = "\u26A0 \u00c9chec";
+          copyBtn.textContent = L.bannerCopyFailed;
         }
       });
       rightDiv.appendChild(copyBtn);
@@ -124,7 +234,7 @@
 
     if (isAttachment && attachment && attachment.sha256) {
       const safeBtn = document.createElement("button");
-      safeBtn.textContent = "Marquer comme s\u00fbr";
+      safeBtn.textContent = L.bannerMarkSafe;
       safeBtn.setAttribute("style", `background:none;border:1px solid ${c.border};color:${c.text};padding:4px 12px;border-radius:4px;cursor:pointer;font-size:13px;white-space:nowrap`);
       safeBtn.addEventListener("click", () => {
         window.postMessage({
@@ -133,7 +243,7 @@
           sha256: attachment.sha256,
           filename: attachment.filename || "",
         }, window.location.origin);
-        safeBtn.textContent = "\u2713 Ajout\u00e9";
+        safeBtn.textContent = L.bannerMarkedSafe;
         safeBtn.disabled = true;
       });
       rightDiv.appendChild(safeBtn);
@@ -180,7 +290,10 @@
   function addStatusBadge(activeLLM, config, onModeChange) {
     const badge = document.createElement("div");
     badge.id = "llm-guard-badge";
-    badge.title = `LLM Guard \u2014 ${activeLLM.name} | mode: ${config.mode} (cliquez pour changer)`;
+    badge.title = L.badgeTitle(activeLLM.name, config.mode);
+    badge.setAttribute("aria-label", L.badgeTitle(activeLLM.name, config.mode));
+    badge.setAttribute("role", "button");
+    badge.setAttribute("tabindex", "0");
     badge.setAttribute("style", `
       position: fixed; bottom: 16px; right: 16px; z-index: 999998;
       width: 36px; height: 36px; border-radius: 50%;
@@ -208,7 +321,8 @@
       const idx = MODE_CYCLE.indexOf(config.mode);
       const newMode = MODE_CYCLE[(idx + 1) % MODE_CYCLE.length];
       config.mode = newMode;
-      badge.title = `LLM Guard \u2014 ${activeLLM.name} | mode: ${newMode} (cliquez pour changer)`;
+      badge.title = L.badgeTitle(activeLLM.name, newMode);
+      badge.setAttribute("aria-label", L.badgeTitle(activeLLM.name, newMode));
       badge.style.background = MODE_COLORS[newMode] || activeLLM.color;
       if (onModeChange) onModeChange(newMode);
     });
@@ -305,7 +419,7 @@
     const btn = document.createElement("button");
     btn.id = "llm-guard-reveal";
     btn.type = "button";
-    btn.textContent = "\u{1F441} R\u00e9v\u00e9ler les PII";
+    btn.textContent = L.revealPII;
     btn.setAttribute("aria-pressed", "false");
     btn.setAttribute("style", [
       "position: fixed",
@@ -531,8 +645,8 @@
     function setButtonAppearance(revealed) {
       if (!revealButtonRef) return;
       revealButtonRef.textContent = revealed
-        ? "\u{1F441}\u200d\u{1F5E8} Masquer les PII"
-        : "\u{1F441} R\u00e9v\u00e9ler les PII";
+        ? L.hidePII
+        : L.revealPII;
       revealButtonRef.setAttribute("aria-pressed", revealed ? "true" : "false");
       revealButtonRef.style.background = revealed ? "#3b1a6e" : "#1a1430";
     }
@@ -628,7 +742,7 @@
           revertToPlaceholdersFn();
         }
         revealState = false;
-        revealButtonRef.textContent = "\u{1F441} R\u00e9v\u00e9ler les PII";
+        revealButtonRef.textContent = L.revealPII;
         revealButtonRef.setAttribute("aria-pressed", "false");
         revealButtonRef.style.background = "#1a1430";
       }

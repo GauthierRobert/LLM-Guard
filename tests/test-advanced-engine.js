@@ -34,7 +34,7 @@ test("Email standard", () => {
 });
 
 test("IBAN", () => {
-  const f = scanRegex("Virement sur FR76 3000 6000 0112 3456 789");
+  const f = scanRegex("Virement sur FR14 2004 1010 0505 0001 3M02 606");
   assert(f.some(x => x.type === "IBAN"), "IBAN non détecté");
 });
 

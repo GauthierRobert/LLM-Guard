@@ -1,0 +1,118 @@
+{
+  "extName": {
+    "message": "LLM Guard — RGPD & AI Act Compliance",
+    "description": "Nom de l'extension affiché dans chrome://extensions."
+  },
+  "extDescription": {
+    "message": "Intercepte, anonymise et journalise les prompts envoyés aux LLM (ChatGPT, Claude, Gemini, Copilot, Mistral, Perplexity, DeepSeek, Grok) pour la conformité RGPD/AI Act."
+  },
+  "popupTagline": { "message": "Multi-LLM — RGPD & AI Act" },
+  "statPrompts": { "message": "Prompts" },
+  "statAnonymized": { "message": "Anonymisés" },
+  "statFlagged": { "message": "Alertés" },
+  "statBlocked": { "message": "Bloqués" },
+  "statAttachments": { "message": "Pièces jointes" },
+  "statAttachmentsFlagged": { "message": "PJ alertées" },
+  "statAttachmentsBlocked": { "message": "PJ bloquées" },
+  "sectionMode": { "message": "Mode de protection" },
+  "modeAnonymize": { "message": "Anonymiser" },
+  "modeVisible": { "message": "Visible" },
+  "modeBlock": { "message": "Bloquer" },
+  "modeHelpAnonymize": { "message": "Les PII sont remplacées par des placeholders ([EMAIL_1]…) avant l'envoi au LLM. La réponse est automatiquement désanonymisée pour que vous lisiez les vraies valeurs." },
+  "modeHelpVisible": { "message": "Anonymisation identique en sortie, mais les placeholders restent affichés dans votre message et la réponse. Un bouton « Révéler les PII » permet de basculer l'affichage vers les vraies valeurs à la demande." },
+  "modeHelpBlock": { "message": "Un envoi contenant une PII critique est interrompu (HTTP 403 local). Rien n'est transmis au LLM." },
+  "sectionLLMUsage": { "message": "Usage par LLM" },
+  "sectionPIITypes": { "message": "Détections par type" },
+  "sectionDashboard": { "message": "Tableau de bord centralisé" },
+  "syncDisabled": { "message": "Envoi désactivé" },
+  "syncErr": { "message": "Erreur d'envoi" },
+  "syncPending": { "message": "Envoi en attente" },
+  "syncOk": { "message": "Synchronisé" },
+  "queueLabel": { "message": "$QUEUED$ en file • $TIME$", "placeholders": {
+    "queued": { "content": "$1" }, "time": { "content": "$2" }
+  }},
+  "openDashboard": { "message": "Ouvrir le dashboard ↗" },
+  "configure": { "message": "Configurer" },
+  "sectionLog": { "message": "Journal récent" },
+  "emptyLog": { "message": "Aucune activité enregistrée." },
+  "btnClear": { "message": "Effacer" },
+  "btnClearAria": { "message": "Effacer tous les logs et statistiques" },
+  "btnExport": { "message": "Exporter JSON" },
+  "btnExportAria": { "message": "Exporter les logs au format JSON" },
+  "confirmClear": { "message": "Effacer tous les logs et statistiques ?" },
+  "filterAll": { "message": "Tous" },
+  "filterBlocked": { "message": "Bloqués" },
+  "filterFlagged": { "message": "Alertés" },
+  "filterAnonymized": { "message": "Anonymisés" },
+  "logDetailsAria": { "message": "Détails de l'entrée du journal" },
+  "loading": { "message": "Chargement…" },
+  "modeActiveBadge": { "message": "Mode actif : $MODE$", "placeholders": {
+    "mode": { "content": "$1" }
+  }},
+
+  "bannerAnonymized": { "message": "🛡 ANONYMISÉ" },
+  "bannerAnonymizedDetail": { "message": " — $COUNT$ donnée(s) remplacée(s) par des placeholders ($TYPES$)", "placeholders": {
+    "count": { "content": "$1" }, "types": { "content": "$2" }
+  }},
+  "bannerBlocked": { "message": "⛔ BLOQUÉ" },
+  "bannerBlockedDetail": { "message": " — $COUNT$ donnée(s) sensible(s) détectée(s) : $TYPES$", "placeholders": {
+    "count": { "content": "$1" }, "types": { "content": "$2" }
+  }},
+  "bannerBlockedSub": { "message": "L'envoi a été bloqué par la politique de sécurité." },
+  "bannerAttachmentBlocked": { "message": "📎 PIÈCE JOINTE BLOQUÉE" },
+  "bannerAttachmentDetected": { "message": "📎 PIÈCE JOINTE — PII détecté" },
+  "bannerWarn": { "message": "⚠️ ATTENTION" },
+  "bannerFile": { "message": "Fichier : " },
+  "bannerTruncated": { "message": "tronqué" },
+  "bannerExtractorUnavailable": { "message": "extracteur indisponible" },
+  "bannerPasswordProtected": { "message": "protégé par mot de passe" },
+  "bannerClose": { "message": "Fermer" },
+  "bannerCopyAnonymized": { "message": "Copier le texte anonymisé" },
+  "bannerCopied": { "message": "✓ Copié" },
+  "bannerCopyFailed": { "message": "⚠ Échec" },
+  "bannerMarkSafe": { "message": "Marquer comme sûr" },
+  "bannerMarkedSafe": { "message": "✓ Ajouté" },
+
+  "revealPII": { "message": "👁 Révéler les PII" },
+  "hidePII": { "message": "👁‍🗨 Masquer les PII" },
+
+  "optsTitle": { "message": "LLM Guard — Configuration" },
+  "optsSubtitle": { "message": "Connexion au tableau de bord centralisé" },
+  "optsSectionTelemetry": { "message": "Envoi au tableau de bord" },
+  "optsEnableTelemetry": { "message": "Activer l'envoi des métadonnées" },
+  "optsEnableTelemetryHint": { "message": "Désactivé par défaut. Seules les métadonnées et les aperçus anonymisés ([EMAIL_1]…) sont envoyés." },
+  "optsSectionBackend": { "message": "Backend" },
+  "optsBackendUrl": { "message": "URL du backend" },
+  "optsBackendUrlHint": { "message": "Endpoint HTTPS de votre instance auto-hébergée. Les évènements sont envoyés à <URL>/v1/events." },
+  "optsDeviceToken": { "message": "Jeton de l'appareil" },
+  "optsDeviceTokenHint": { "message": "Bearer token généré depuis le tableau de bord (page Devices → Rotate token)." },
+  "optsShowPassword": { "message": "Afficher" },
+  "optsHidePassword": { "message": "Masquer" },
+  "optsSectionOrg": { "message": "Organisation" },
+  "optsOrgId": { "message": "Org ID" },
+  "optsOrgIdHint": { "message": "Identifiant de l'organisation. Communiqué par l'administrateur." },
+  "optsUserEmail": { "message": "Email utilisateur (optionnel)" },
+  "optsUserEmailHint": { "message": "Utilisé pour distinguer vos évènements dans le tableau de bord. Laissez vide pour rester anonyme." },
+  "optsSave": { "message": "Enregistrer" },
+  "optsSaved": { "message": "Configuration enregistrée." },
+  "optsSaveCancelled": { "message": "Enregistrement annulé. Utilisez HTTPS en production." },
+  "optsHttpsRequired": { "message": "L'URL doit commencer par http:// ou https://" },
+  "optsHttpWarning": { "message": "⚠ L'URL du backend utilise HTTP (non chiffré). Le jeton de l'appareil et les métadonnées seront envoyés en clair. Confirmer malgré tout ?" },
+  "optsSectionSync": { "message": "Synchronisation" },
+  "optsQueued": { "message": "Évènements en file" },
+  "optsLastSend": { "message": "Dernier envoi" },
+  "optsNever": { "message": "Jamais" },
+  "optsLastError": { "message": "Erreur" },
+  "optsEvicted": { "message": "Événements perdus (file saturée)" },
+  "optsFlushStats": { "message": "Succès / tentatives" },
+  "optsFlushNow": { "message": "Forcer la synchronisation" },
+  "optsTestConnection": { "message": "Tester la connexion" },
+  "optsConnected": { "message": "Connecté (HTTP $STATUS$).", "placeholders": {
+    "status": { "content": "$1" }
+  }},
+  "optsSending": { "message": "Envoi en cours…" },
+  "optsSendDone": { "message": "Envoi terminé." },
+  "optsFailure": { "message": "Échec : $REASON$", "placeholders": {
+    "reason": { "content": "$1" }
+  }}
+}

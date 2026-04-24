@@ -136,5 +136,37 @@ test("onOverflow fires exactly once when map exceeds maxMapSize", () => {
   assert(a.anonymizationMap.size <= 3, `map size should be bounded to 3, got ${a.anonymizationMap.size}`);
 });
 
+test("overflowed flag flips and deanonymize becomes a no-op", () => {
+  // After eviction, evicted placeholders can no longer be mapped back —
+  // returning the raw placeholder would leak garbage to the UI. Deanonymize
+  // must bail out and return the text unchanged once overflow has fired.
+  const a = createAnonymizer({ patterns: PII_PATTERNS, maxMapSize: 2 });
+  const r1 = a.anonymize("alice@x.com");
+  const p1 = [...r1.mappings.keys()][0];
+  for (let i = 0; i < 5; i++) a.anonymize(`u${i}@x.com`);
+  assert(a.overflowed, "overflowed flag should be true after exceeding map");
+  eq(a.deanonymize(`Refers to ${p1}`), `Refers to ${p1}`, "deanonymize must pass through on overflow");
+});
+
+console.log("\n\x1b[1m🔐 Anonymizer — stream tail buffer bound\x1b[0m");
+
+test("stream tail stays bounded when chunks never close a placeholder", () => {
+  const a = createAnonymizer({ patterns: PII_PATTERNS });
+  a.anonymize("alice@acme.com"); // seeds maxPlaceholderLen
+  const deanon = a.makeStreamDeanonymizer();
+  // Feed ~10KB of content with a lone '[' but no matching ']'. The carry
+  // buffer must not grow unbounded; output must keep flowing.
+  let emitted = "";
+  for (let i = 0; i < 100; i++) {
+    emitted += deanon.push("some text [unfinished fragment ");
+  }
+  emitted += deanon.flush();
+  // Everything we pushed must surface eventually (modulo internal ordering),
+  // and the byte count out must be within the byte count in.
+  const inputLen = "some text [unfinished fragment ".length * 100;
+  assert(emitted.length >= inputLen - 200, `emitted too little: ${emitted.length}/${inputLen}`);
+  assert(emitted.length <= inputLen + 10, `emitted too much: ${emitted.length}/${inputLen}`);
+});
+
 console.log(`\n\x1b[1m${passed}/${total} tests passed\x1b[0m`);
 if (failed > 0) process.exit(1);

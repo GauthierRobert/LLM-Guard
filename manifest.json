@@ -1,8 +1,9 @@
 {
   "manifest_version": 3,
-  "name": "LLM Guard — RGPD & AI Act Compliance",
+  "default_locale": "en",
+  "name": "__MSG_extName__",
   "version": "2.0.0",
-  "description": "Intercepte, anonymise et journalise les prompts envoyés aux LLM (ChatGPT, Claude, Gemini, Copilot, Mistral, Perplexity, DeepSeek, Grok) pour la conformité RGPD/AI Act.",
+  "description": "__MSG_extDescription__",
   "permissions": ["storage", "activeTab", "alarms"],
   "host_permissions": [
     "https://chatgpt.com/*",
@@ -82,7 +83,7 @@
   ],
   "action": {
     "default_popup": "popup.html",
-    "default_title": "LLM Guard"
+    "default_title": "__MSG_extName__"
   },
   "icons": {
     "48": "icons/icon48.png",

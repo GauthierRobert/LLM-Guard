@@ -1,0 +1,118 @@
+{
+  "extName": {
+    "message": "LLM Guard — GDPR & AI Act Compliance",
+    "description": "Extension name shown in chrome://extensions."
+  },
+  "extDescription": {
+    "message": "Intercepts, anonymizes and logs prompts sent to LLMs (ChatGPT, Claude, Gemini, Copilot, Mistral, Perplexity, DeepSeek, Grok) for GDPR/AI Act compliance."
+  },
+  "popupTagline": { "message": "Multi-LLM — GDPR & AI Act" },
+  "statPrompts": { "message": "Prompts" },
+  "statAnonymized": { "message": "Anonymized" },
+  "statFlagged": { "message": "Flagged" },
+  "statBlocked": { "message": "Blocked" },
+  "statAttachments": { "message": "Attachments" },
+  "statAttachmentsFlagged": { "message": "Flagged attach." },
+  "statAttachmentsBlocked": { "message": "Blocked attach." },
+  "sectionMode": { "message": "Protection mode" },
+  "modeAnonymize": { "message": "Anonymize" },
+  "modeVisible": { "message": "Visible" },
+  "modeBlock": { "message": "Block" },
+  "modeHelpAnonymize": { "message": "PII are replaced by placeholders ([EMAIL_1]…) before being sent to the LLM. The response is automatically de-anonymized so you read the real values." },
+  "modeHelpVisible": { "message": "Same outbound anonymization, but placeholders stay visible in your message and the response. A “Reveal PII” button lets you toggle between placeholders and real values on demand." },
+  "modeHelpBlock": { "message": "An outgoing request containing a critical PII is interrupted (HTTP 403 locally). Nothing reaches the LLM." },
+  "sectionLLMUsage": { "message": "Usage by LLM" },
+  "sectionPIITypes": { "message": "Detections by type" },
+  "sectionDashboard": { "message": "Central dashboard" },
+  "syncDisabled": { "message": "Telemetry disabled" },
+  "syncErr": { "message": "Send error" },
+  "syncPending": { "message": "Pending send" },
+  "syncOk": { "message": "Synced" },
+  "queueLabel": { "message": "$QUEUED$ queued • $TIME$", "placeholders": {
+    "queued": { "content": "$1" }, "time": { "content": "$2" }
+  }},
+  "openDashboard": { "message": "Open dashboard ↗" },
+  "configure": { "message": "Configure" },
+  "sectionLog": { "message": "Recent activity" },
+  "emptyLog": { "message": "No recorded activity." },
+  "btnClear": { "message": "Clear" },
+  "btnClearAria": { "message": "Clear all logs and statistics" },
+  "btnExport": { "message": "Export JSON" },
+  "btnExportAria": { "message": "Export logs as JSON file" },
+  "confirmClear": { "message": "Erase all logs and statistics?" },
+  "filterAll": { "message": "All" },
+  "filterBlocked": { "message": "Blocked" },
+  "filterFlagged": { "message": "Flagged" },
+  "filterAnonymized": { "message": "Anonymized" },
+  "logDetailsAria": { "message": "Details of log entry" },
+  "loading": { "message": "Loading…" },
+  "modeActiveBadge": { "message": "Active mode: $MODE$", "placeholders": {
+    "mode": { "content": "$1" }
+  }},
+
+  "bannerAnonymized": { "message": "🛡 ANONYMIZED" },
+  "bannerAnonymizedDetail": { "message": " — $COUNT$ value(s) replaced by placeholders ($TYPES$)", "placeholders": {
+    "count": { "content": "$1" }, "types": { "content": "$2" }
+  }},
+  "bannerBlocked": { "message": "⛔ BLOCKED" },
+  "bannerBlockedDetail": { "message": " — $COUNT$ sensitive value(s) detected: $TYPES$", "placeholders": {
+    "count": { "content": "$1" }, "types": { "content": "$2" }
+  }},
+  "bannerBlockedSub": { "message": "Submission blocked by security policy." },
+  "bannerAttachmentBlocked": { "message": "📎 ATTACHMENT BLOCKED" },
+  "bannerAttachmentDetected": { "message": "📎 ATTACHMENT — PII detected" },
+  "bannerWarn": { "message": "⚠️ WARNING" },
+  "bannerFile": { "message": "File: " },
+  "bannerTruncated": { "message": "truncated" },
+  "bannerExtractorUnavailable": { "message": "extractor unavailable" },
+  "bannerPasswordProtected": { "message": "password-protected" },
+  "bannerClose": { "message": "Close" },
+  "bannerCopyAnonymized": { "message": "Copy anonymized text" },
+  "bannerCopied": { "message": "✓ Copied" },
+  "bannerCopyFailed": { "message": "⚠ Failed" },
+  "bannerMarkSafe": { "message": "Mark as safe" },
+  "bannerMarkedSafe": { "message": "✓ Added" },
+
+  "revealPII": { "message": "👁 Reveal PII" },
+  "hidePII": { "message": "👁‍🗨 Hide PII" },
+
+  "optsTitle": { "message": "LLM Guard — Configuration" },
+  "optsSubtitle": { "message": "Connection to central dashboard" },
+  "optsSectionTelemetry": { "message": "Send to dashboard" },
+  "optsEnableTelemetry": { "message": "Enable metadata upload" },
+  "optsEnableTelemetryHint": { "message": "Disabled by default. Only metadata and anonymized previews ([EMAIL_1]…) are sent." },
+  "optsSectionBackend": { "message": "Backend" },
+  "optsBackendUrl": { "message": "Backend URL" },
+  "optsBackendUrlHint": { "message": "HTTPS endpoint of your self-hosted instance. Events are sent to <URL>/v1/events." },
+  "optsDeviceToken": { "message": "Device token" },
+  "optsDeviceTokenHint": { "message": "Bearer token generated from the dashboard (Devices → Rotate token page)." },
+  "optsShowPassword": { "message": "Show" },
+  "optsHidePassword": { "message": "Hide" },
+  "optsSectionOrg": { "message": "Organization" },
+  "optsOrgId": { "message": "Org ID" },
+  "optsOrgIdHint": { "message": "Organization identifier. Provided by the administrator." },
+  "optsUserEmail": { "message": "User email (optional)" },
+  "optsUserEmailHint": { "message": "Used to distinguish your events in the dashboard. Leave blank to stay anonymous." },
+  "optsSave": { "message": "Save" },
+  "optsSaved": { "message": "Configuration saved." },
+  "optsSaveCancelled": { "message": "Save cancelled. Use HTTPS in production." },
+  "optsHttpsRequired": { "message": "URL must start with http:// or https://" },
+  "optsHttpWarning": { "message": "⚠ Backend URL uses HTTP (not encrypted). The device token and metadata will be sent in cleartext. Confirm anyway?" },
+  "optsSectionSync": { "message": "Synchronization" },
+  "optsQueued": { "message": "Queued events" },
+  "optsLastSend": { "message": "Last send" },
+  "optsNever": { "message": "Never" },
+  "optsLastError": { "message": "Error" },
+  "optsEvicted": { "message": "Events dropped (outbox full)" },
+  "optsFlushStats": { "message": "Successes / attempts" },
+  "optsFlushNow": { "message": "Force sync" },
+  "optsTestConnection": { "message": "Test connection" },
+  "optsConnected": { "message": "Connected (HTTP $STATUS$).", "placeholders": {
+    "status": { "content": "$1" }
+  }},
+  "optsSending": { "message": "Sending…" },
+  "optsSendDone": { "message": "Send complete." },
+  "optsFailure": { "message": "Failure: $REASON$", "placeholders": {
+    "reason": { "content": "$1" }
+  }}
+}

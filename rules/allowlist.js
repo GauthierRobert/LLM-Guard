@@ -33,6 +33,34 @@
     });
   }
 
+  // Rules that threw when tested are disabled for the rest of the session so
+  // subsequent `isAllowlisted` calls don't re-throw in the hot path. We keep
+  // the Set keyed by the rule object so a storage reload (which rebuilds the
+  // rule objects via `parseEntries`) automatically clears the blacklist.
+  const disabledRules = new WeakSet();
+
+  function testRule(rule, matchedText) {
+    if (disabledRules.has(rule)) return false;
+    try {
+      if (rule.pattern instanceof RegExp) {
+        return rule.pattern.test(matchedText);
+      }
+      if (typeof rule.pattern === "string") {
+        return matchedText.toLowerCase().includes(rule.pattern.toLowerCase());
+      }
+      return false;
+    } catch (err) {
+      disabledRules.add(rule);
+      try {
+        console.warn(
+          "[LLM Guard] allowlist rule threw and was disabled for this session:",
+          { type: rule.type, pattern: String(rule.pattern), error: err && err.message }
+        );
+      } catch { /* console missing — non-fatal */ }
+      return false;
+    }
+  }
+
   /**
    * Check if a text match should be exempted from PII detection.
    * @param {string} matchedText - The detected PII text
@@ -42,11 +70,7 @@
   function isAllowlisted(matchedText, piiType) {
     const allRules = [...DEFAULT_ALLOWLIST, ...companyAllowlist, ...customAllowlist];
     for (const rule of allRules) {
-      if (rule.pattern instanceof RegExp) {
-        if (rule.pattern.test(matchedText)) return true;
-      } else if (typeof rule.pattern === "string") {
-        if (matchedText.toLowerCase().includes(rule.pattern.toLowerCase())) return true;
-      }
+      if (testRule(rule, matchedText)) return true;
     }
     return false;
   }
@@ -75,11 +99,22 @@
     const allRules = [...DEFAULT_ALLOWLIST, ...companyAllowlist, ...customAllowlist];
     for (const rule of allRules) {
       if (rule.type !== "attachment") continue;
-      if (rule.pattern instanceof RegExp) {
-        if (rule.pattern.test(sha256) || (filename && rule.pattern.test(filename))) return true;
-      } else if (typeof rule.pattern === "string") {
-        if (rule.pattern === sha256) return true;
-        if (filename && rule.pattern.toLowerCase() === String(filename).toLowerCase()) return true;
+      if (disabledRules.has(rule)) continue;
+      try {
+        if (rule.pattern instanceof RegExp) {
+          if (rule.pattern.test(sha256) || (filename && rule.pattern.test(filename))) return true;
+        } else if (typeof rule.pattern === "string") {
+          if (rule.pattern === sha256) return true;
+          if (filename && rule.pattern.toLowerCase() === String(filename).toLowerCase()) return true;
+        }
+      } catch (err) {
+        disabledRules.add(rule);
+        try {
+          console.warn(
+            "[LLM Guard] attachment allowlist rule threw and was disabled:",
+            { pattern: String(rule.pattern), error: err && err.message }
+          );
+        } catch { /* non-fatal */ }
       }
     }
     return false;

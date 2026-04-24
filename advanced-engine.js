@@ -291,15 +291,17 @@ function scanContextual(text) {
 // AVANT d'être envoyé à ChatGPT/Gemini/etc.
 // ═══════════════════════════════════════════════════════════════
 
+// API credentials are read from the environment, never from this file.
+// Hardcoding `apiKey` here risks a commit leaking a live Anthropic credential
+// to git history; pulling from `process.env` keeps the secret out of the repo
+// and makes CI/local-dev enablement explicit (`LLM_GUARD_CLASSIFIER_KEY=...`).
 const LLM_CLASSIFIER_CONFIG = {
-  enabled: false, // Mettre à true pour activer
+  enabled: process.env.LLM_GUARD_CLASSIFIER_ENABLED === "1",
   apiUrl: "https://api.anthropic.com/v1/messages",
-  apiKey: "", // Votre clé API Anthropic
+  get apiKey() { return process.env.LLM_GUARD_CLASSIFIER_KEY || ""; },
   model: "claude-sonnet-4-20250514",
   maxTokens: 300,
-  // Seuil de confiance (0-1) au-dessus duquel on considère le prompt sensible
   confidenceThreshold: 0.7,
-  // Timeout en ms
   timeout: 3000,
 };
 

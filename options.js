@@ -18,7 +18,21 @@ const FIELDS = [
   ["opt-device-id", "deviceId", "text"],
 ];
 
+function t(key, subs) {
+  try { return chrome.i18n.getMessage(key, subs) || ""; }
+  catch { return ""; }
+}
+
+function applyI18n(root) {
+  root.querySelectorAll("[data-i18n]").forEach((el) => {
+    const key = el.getAttribute("data-i18n");
+    const msg = t(key);
+    if (msg) el.textContent = msg;
+  });
+}
+
 document.addEventListener("DOMContentLoaded", async () => {
+  applyI18n(document);
   await loadConfig();
   await loadLayer4Config();
   await loadAttachmentConfig();
@@ -30,9 +44,42 @@ document.addEventListener("DOMContentLoaded", async () => {
   $("btn-regenerate").addEventListener("click", regenerateDeviceId);
   $("btn-layer4-test").addEventListener("click", testLayer4);
 
+  // Live toggle on the device-token field so users can verify what they
+  // pasted without committing to a permanent plaintext display.
+  const tokenInput = $("opt-device-token");
+  const peekBtn = $("btn-peek-token");
+  if (peekBtn && tokenInput) {
+    peekBtn.addEventListener("click", () => {
+      const showing = tokenInput.type === "text";
+      tokenInput.type = showing ? "password" : "text";
+      const nextLabel = showing ? t("optsShowPassword") : t("optsHidePassword");
+      peekBtn.textContent = nextLabel || (showing ? "Show" : "Hide");
+      peekBtn.setAttribute("aria-label", nextLabel || peekBtn.textContent);
+    });
+  }
+
+  // Live http:// warning as the user types — avoids saving-then-confirming
+  // if they pasted an insecure URL by accident.
+  const urlInput = $("opt-backend-url");
+  if (urlInput) {
+    const update = () => updateBackendHttpWarning(urlInput.value);
+    urlInput.addEventListener("input", update);
+    urlInput.addEventListener("blur", update);
+    update();
+  }
+
   // Refresh state every 5s while the page is open.
   setInterval(loadState, 5000);
 });
+
+function updateBackendHttpWarning(value) {
+  const warn = $("backend-http-warning");
+  if (!warn) return;
+  const v = (value || "").trim();
+  const danger = /^http:\/\//i.test(v) && !isSafeInsecureBackend(v);
+  warn.classList.toggle("visible", danger);
+  if (danger && !warn.textContent) warn.textContent = t("optsHttpWarning") || "";
+}
 
 async function loadConfig() {
   const cfg = await sendMsg({ type: "telemetry.getConfig" });
@@ -53,21 +100,21 @@ async function saveConfig() {
     else if (!el.readOnly) patch[key] = el.value.trim();
   }
   if (patch.backendUrl && !/^https?:\/\//i.test(patch.backendUrl)) {
-    return showStatus("L'URL doit commencer par http:// ou https://", "err");
+    return showStatus(t("optsHttpsRequired") || "URL must start with http:// or https://", "err");
   }
   // Refuse plaintext backends unless the host is localhost/127.x.x.x — the
   // device token is a long-lived bearer credential and shipping it over
   // http:// to anything else is almost always a misconfiguration.
   if (patch.backendUrl && !isSafeInsecureBackend(patch.backendUrl)) {
     const ok = confirm(
-      "⚠ L'URL du backend utilise HTTP (non chiffré). Le jeton de l'appareil et les métadonnées seront envoyés en clair. Confirmer malgré tout ?"
+      t("optsHttpWarning") || "Backend URL uses HTTP. Confirm anyway?"
     );
-    if (!ok) return showStatus("Enregistrement annulé. Utilisez HTTPS en production.", "err");
+    if (!ok) return showStatus(t("optsSaveCancelled") || "Save cancelled.", "err");
   }
 
   const layer4Url = $("opt-layer4-presidio-url").value.trim().replace(/\/+$/, "");
   if (layer4Url && !/^https?:\/\//i.test(layer4Url)) {
-    return showStatus("L'URL Presidio doit commencer par http:// ou https://", "err");
+    return showStatus(t("optsHttpsRequired") || "URL must start with http:// or https://", "err");
   }
 
   const saved = await sendMsg({ type: "telemetry.setConfig", patch });
@@ -106,7 +153,7 @@ async function saveConfig() {
     },
   });
 
-  showStatus("Configuration enregistrée.", "ok");
+  showStatus(t("optsSaved") || "Configuration saved.", "ok");
 }
 
 async function loadAttachmentConfig() {
@@ -190,7 +237,7 @@ async function loadState() {
   $("q-count").textContent = state.queued || 0;
   $("q-last").textContent = state.lastSentAt
     ? new Date(state.lastSentAt).toLocaleString("fr-FR")
-    : "Jamais";
+    : (t("optsNever") || "Never");
   const errTxt = state.lastError || "";
   const errAt = state.lastErrorAt
     ? ` (${new Date(state.lastErrorAt).toLocaleString("fr-FR")})`
@@ -204,18 +251,18 @@ async function loadState() {
 }
 
 async function flushNow() {
-  showStatus("Envoi en cours…", "");
+  showStatus(t("optsSending") || "Sending…", "");
   const res = await sendMsg({ type: "telemetry.flush" });
   await loadState();
-  if (res?.error) showStatus(`Échec: ${res.error}`, "err");
-  else showStatus("Envoi terminé.", "ok");
+  if (res?.error) showStatus(t("optsFailure", [String(res.error)]) || `Failure: ${res.error}`, "err");
+  else showStatus(t("optsSendDone") || "Send complete.", "ok");
 }
 
 async function testConnection() {
-  showStatus("Test en cours…", "");
+  showStatus(t("optsSending") || "Sending…", "");
   const res = await sendMsg({ type: "telemetry.test" });
-  if (res?.ok) showStatus(`Connecté (HTTP ${res.status}).`, "ok");
-  else showStatus(`Échec: ${res?.error || "inconnu"}`, "err");
+  if (res?.ok) showStatus(t("optsConnected", [String(res.status)]) || `Connected (HTTP ${res.status}).`, "ok");
+  else showStatus(t("optsFailure", [String(res?.error || "unknown")]) || `Failure: ${res?.error || "unknown"}`, "err");
 }
 
 async function regenerateDeviceId() {

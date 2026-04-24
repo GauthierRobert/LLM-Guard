@@ -83,9 +83,17 @@ test("+33", () => assertDetects("+33 6 12 34 56 78", "Téléphone FR"));
 test("UK", () => assertDetects("+44 7911 123456", "Téléphone international"));
 
 console.log("\n\x1b[1m🏦 IBAN / CB / NSS\x1b[0m");
-test("IBAN FR", () => assertDetects("FR76 3000 6000 0112 3456 789", "IBAN"));
+test("IBAN FR (mod-97 valide)", () => assertDetects("FR14 2004 1010 0505 0001 3M02 606", "IBAN"));
+test("IBAN invalide (mod-97 rejeté)", () => {
+  const f = scanForPII("FR76 3000 6000 0112 3456 789");
+  assert(!f.some((x) => x.type === "IBAN"), "IBAN avec mauvaise clé ne doit PAS matcher");
+});
 test("CB espaces (Luhn valide)", () => assertDetects("4111 1111 1111 1111", "Carte bancaire"));
-test("NSS", () => assertDetects("1 85 05 78 006 084 36", "Numéro SS"));
+test("NSS (INSEE clé valide)", () => assertDetects("1 85 05 78 006 084 91", "Numéro SS"));
+test("NSS clé invalide ignoré", () => {
+  const f = scanForPII("1 85 05 78 006 084 36");
+  assert(!f.some((x) => x.type === "Numéro SS"), "NSS avec mauvaise clé ne doit PAS matcher");
+});
 
 console.log("\n\x1b[1m🔑 Mots de passe\x1b[0m");
 test("password:", () => assertDetects("password: hunter2", "Mot de passe"));
@@ -125,7 +133,7 @@ test("Anonymise un téléphone", () => {
 });
 
 test("Anonymise un IBAN", () => {
-  const { anonymized } = anonymizeText("Virement sur FR76 3000 6000 0112 3456 789");
+  const { anonymized } = anonymizeText("Virement sur FR14 2004 1010 0505 0001 3M02 606");
   assert(anonymized.includes("[IBAN_"), "Doit contenir un placeholder IBAN");
 });
 
@@ -262,6 +270,46 @@ test("SIREN non-Luhn ignoré", () => {
 test("SIRET Luhn-valide détecté", () => assertDetects("SIRET 35600000000048", "SIRET"));
 
 test("Numéro TVA UE détecté", () => assertDetects("VAT FR40303265045 invoice", "Numéro TVA UE"));
+
+// ─── Tests secrets additionnels ────────────────────────────────
+
+console.log("\n\x1b[1m🔐 Secrets — tokens cloud & API keys\x1b[0m");
+
+test("Anthropic API key détectée", () =>
+  assertDetects("key=sk-ant-api03-AaBbCcDdEeFfGgHhIi1234567890_-", "Anthropic API key"));
+
+test("AWS STS session credential détecté", () =>
+  assertDetects("aws_access_key_id = ASIAIOSFODNN7EXAMPLE", "Clé AWS STS"));
+
+test("Bearer token générique détecté", () => {
+  const f = scanForPII("Authorization: Bearer abcdef0123456789ABCDEF0123456789abcdef01234567890");
+  assert(f.some((x) => x.type === "Bearer token"), "Bearer token opaque ne devrait pas être raté");
+});
+
+test("Bearer JWT géré par le pattern JWT (pas double-flag)", () => {
+  const jwt = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJzdWIiOiIxMjM0NTY3ODkwIiwibmFtZSI6IkpvaG4gRG9lIiwiaWF0IjoxNTE2MjM5MDIyfQ.SflKxwRJSMeKKF2QT4fwpMeJf36POk6yJV_adQssw5c";
+  const f = scanForPII(`Authorization: Bearer ${jwt}`);
+  assert(f.some((x) => x.type === "JWT"), "JWT doit être détecté");
+  assert(!f.some((x) => x.type === "Bearer token"), "Bearer token ne doit PAS dupliquer le JWT");
+});
+
+test("GCP service-account JSON détecté", () => {
+  const sa = '{"type": "service_account", "project_id": "my-proj", "private_key_id": "abc", "private_key": "-----BEGIN PRIVATE KEY-----\\nMIIEvQ...\\n-----END PRIVATE KEY-----\\n"}';
+  assertDetects(sa, "Clé GCP service-account");
+});
+
+// ─── Tests régression: téléphone resserré ──────────────────────
+
+console.log("\n\x1b[1m📞 Téléphone — faux positifs évités\x1b[0m");
+
+test("Date DD.MM.YYYY n'est pas téléphone", () => {
+  const f = scanForPII("Réunion du 01.01.2025 confirmée");
+  assert(!f.some((x) => x.type === "Téléphone FR"), "date ne doit pas matcher Téléphone FR");
+});
+
+test("Téléphone FR légitime toujours détecté après resserrage", () => {
+  assertDetects("Appel: 06 12 34 56 78 merci", "Téléphone FR");
+});
 
 // ─── Résumé ────────────────────────────────────────────────────
 console.log("\n" + "═".repeat(50));

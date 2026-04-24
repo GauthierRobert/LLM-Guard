@@ -1,11 +1,11 @@
 <!DOCTYPE html>
-<html lang="fr">
+<html lang="en">
 <head>
 <meta charset="UTF-8">
 <style>
   * { margin: 0; padding: 0; box-sizing: border-box; }
   body {
-    width: 420px; max-height: 580px; overflow-y: auto;
+    width: 420px; max-height: 600px; overflow-y: auto;
     font-family: system-ui, -apple-system, sans-serif;
     background: #0e0f11; color: #d1d0c7; font-size: 13px;
   }
@@ -18,25 +18,43 @@
   .header h1 { font-size: 15px; font-weight: 600; color: #e1f5ee; }
   .header p { font-size: 11px; color: #9fe1cb; margin-top: 2px; }
   .version { font-size: 10px; background: rgba(255,255,255,0.15); padding: 2px 6px; border-radius: 3px; color: #9fe1cb; margin-left: 8px; }
+  .mode-badge { margin-left: auto; font-size: 10px; padding: 3px 8px; border-radius: 10px; background: rgba(255,255,255,0.15); color: #e1f5ee; font-weight: 600; letter-spacing: 0.3px; text-transform: uppercase; }
 
   .stats-grid { display: grid; grid-template-columns: repeat(4, 1fr); gap: 1px; background: #1e1f23; margin: 1px 0; }
   .stat-card { background: #14151a; padding: 10px; text-align: center; }
   .stat-value { font-size: 20px; font-weight: 700; font-variant-numeric: tabular-nums; }
-  .stat-label { font-size: 9px; text-transform: uppercase; letter-spacing: 0.5px; color: #888780; margin-top: 3px; }
-  .v-green { color: #5DCAA5; }
-  .v-amber { color: #EF9F27; }
-  .v-red { color: #E24B4A; }
-  .v-teal { color: #5DCAA5; }
+  .stat-label { font-size: 9px; text-transform: uppercase; letter-spacing: 0.5px; color: #a8a79d; margin-top: 3px; }
+  .v-green { color: #6FD8B4; }
+  .v-amber { color: #F5B446; }
+  .v-red { color: #EF6867; }
+  .v-teal { color: #6FD8B4; }
+
+  .skeleton {
+    display: inline-block; min-width: 24px; height: 16px;
+    background: linear-gradient(90deg, #1e1f23 0%, #2a2b30 50%, #1e1f23 100%);
+    background-size: 200% 100%;
+    animation: shimmer 1.4s ease-in-out infinite;
+    border-radius: 3px;
+  }
+  @keyframes shimmer {
+    0%   { background-position: 200% 0; }
+    100% { background-position: -200% 0; }
+  }
 
   .section { padding: 12px 16px; border-bottom: 1px solid #1e1f23; }
-  .section-title { font-size: 11px; text-transform: uppercase; letter-spacing: 0.8px; color: #888780; margin-bottom: 8px; }
+  .section-title { font-size: 11px; text-transform: uppercase; letter-spacing: 0.8px; color: #a8a79d; margin-bottom: 8px; }
 
   .mode-toggle { display: flex; background: #1e1f23; border-radius: 6px; overflow: hidden; }
-  .mode-btn { flex: 1; padding: 7px 4px; text-align: center; cursor: pointer; border: none; background: transparent; color: #888780; font-size: 11px; font-weight: 500; transition: all 0.2s; }
+  .mode-btn { flex: 1; padding: 7px 4px; text-align: center; cursor: pointer; border: none; background: transparent; color: #a8a79d; font-size: 11px; font-weight: 500; transition: all 0.2s; }
   .mode-btn.active { background: #0F6E56; color: #e1f5ee; }
   .mode-btn:hover:not(.active) { background: #2a2b30; color: #d1d0c7; }
+  .mode-btn:focus-visible { outline: 2px solid #6FD8B4; outline-offset: -2px; }
 
-  .mode-help { margin-top: 8px; font-size: 11px; color: #888780; line-height: 1.45; }
+  .mode-help { margin-top: 8px; font-size: 11px; color: #a8a79d; line-height: 1.45; }
+  .mode-help summary { cursor: pointer; padding: 4px 0; color: #b4b2a9; font-weight: 500; list-style: none; }
+  .mode-help summary::-webkit-details-marker { display: none; }
+  .mode-help summary::before { content: "▸ "; color: #6FD8B4; }
+  .mode-help[open] summary::before { content: "▾ "; }
   .mode-help b { color: #d1d0c7; font-weight: 600; }
   .mode-help .item { padding: 4px 0; }
   .mode-help .item + .item { border-top: 1px solid #1e1f23; }
@@ -46,142 +64,172 @@
   .llm-name { width: 70px; font-size: 12px; font-weight: 500; }
   .llm-bar-track { flex: 1; height: 6px; background: #1e1f23; border-radius: 3px; overflow: hidden; position: relative; }
   .llm-bar-fill { height: 100%; border-radius: 3px; transition: width 0.3s; position: absolute; left: 0; top: 0; }
-  .llm-count { width: 30px; text-align: right; font-size: 11px; color: #888780; font-variant-numeric: tabular-nums; }
+  .llm-count { width: 30px; text-align: right; font-size: 11px; color: #a8a79d; font-variant-numeric: tabular-nums; }
 
   .pii-bar { display: flex; align-items: center; gap: 8px; padding: 3px 0; }
   .pii-bar-label { width: 120px; font-size: 11px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
   .pii-bar-track { flex: 1; height: 5px; background: #1e1f23; border-radius: 3px; overflow: hidden; }
-  .pii-bar-fill { height: 100%; border-radius: 3px; background: #EF9F27; transition: width 0.3s; }
-  .pii-bar-count { width: 26px; text-align: right; font-size: 11px; font-variant-numeric: tabular-nums; color: #888780; }
+  .pii-bar-fill { height: 100%; border-radius: 3px; background: #F5B446; transition: width 0.3s; }
+  .pii-bar-count { width: 26px; text-align: right; font-size: 11px; font-variant-numeric: tabular-nums; color: #a8a79d; }
 
-  .log-entry { padding: 7px 0; border-bottom: 1px solid #1a1b1f; display: flex; gap: 8px; align-items: flex-start; }
+  .log-filters { display: flex; gap: 6px; margin-bottom: 8px; flex-wrap: wrap; }
+  .log-filter {
+    background: transparent; border: 1px solid #2a2b30; color: #a8a79d;
+    padding: 3px 8px; border-radius: 10px; font-size: 10px; cursor: pointer;
+    text-transform: uppercase; letter-spacing: 0.5px; transition: all 0.15s;
+  }
+  .log-filter:hover { border-color: #5f5e5a; color: #d1d0c7; }
+  .log-filter.active { background: #0F6E56; border-color: #0F6E56; color: #e1f5ee; }
+  .log-filter:focus-visible { outline: 2px solid #6FD8B4; outline-offset: 1px; }
+
+  .log-entry { padding: 7px 0; border-bottom: 1px solid #1a1b1f; display: flex; gap: 8px; align-items: flex-start; cursor: pointer; }
   .log-entry:last-child { border-bottom: none; }
+  .log-entry:hover { background: rgba(15,110,86,0.06); }
+  .log-entry:focus-visible { outline: 2px solid #6FD8B4; outline-offset: -2px; }
   .log-dot { width: 8px; height: 8px; border-radius: 50%; margin-top: 4px; flex-shrink: 0; }
-  .log-dot.clean { background: #5DCAA5; }
-  .log-dot.warn { background: #EF9F27; }
-  .log-dot.block { background: #E24B4A; }
-  .log-dot.anon { background: #1D9E75; }
+  .log-dot.clean { background: #6FD8B4; }
+  .log-dot.warn { background: #F5B446; }
+  .log-dot.block { background: #EF6867; }
+  .log-dot.anon { background: #24B88A; }
   .log-text { flex: 1; }
-  .log-time { font-size: 10px; color: #5f5e5a; font-variant-numeric: tabular-nums; }
+  .log-time { font-size: 10px; color: #8a8983; font-variant-numeric: tabular-nums; }
   .log-prompt { font-size: 12px; color: #b4b2a9; margin-top: 2px; word-break: break-word; }
   .log-meta { display: flex; gap: 4px; margin-top: 3px; flex-wrap: wrap; }
   .log-tag { font-size: 10px; padding: 1px 6px; border-radius: 3px; font-weight: 500; }
-  .log-tag.critical { background: #501313; color: #F09595; }
-  .log-tag.high { background: #4A1B0C; color: #F0997B; }
-  .log-tag.medium { background: #412402; color: #FAC775; }
-  .log-tag.low { background: #042C53; color: #85B7EB; }
+  .log-tag.critical { background: #5a1616; color: #FFB5B5; }
+  .log-tag.high { background: #542010; color: #FFB294; }
+  .log-tag.medium { background: #4a2905; color: #FFD48A; }
+  .log-tag.low { background: #053561; color: #A1C8F8; }
   .log-tag.llm { background: #1e1f23; color: #d1d0c7; }
+  .log-detail { margin-top: 6px; padding: 8px; background: #0e0f11; border: 1px solid #1e1f23; border-radius: 4px; font-size: 11px; color: #b4b2a9; }
+  .log-detail code { color: #9fe1cb; font-family: monospace; word-break: break-all; }
+  .log-detail dt { font-weight: 600; color: #d1d0c7; margin-top: 4px; }
+  .log-detail dt:first-child { margin-top: 0; }
+  .log-detail dd { margin-left: 0; }
 
-  .empty-state { text-align: center; padding: 20px; color: #5f5e5a; font-size: 12px; }
+  .empty-state { text-align: center; padding: 20px; color: #8a8983; font-size: 12px; }
 
   .footer { padding: 10px 16px; display: flex; justify-content: space-between; align-items: center; flex-wrap: wrap; gap: 6px; }
-  .btn { background: none; border: 1px solid #2a2b30; color: #888780; padding: 5px 10px; border-radius: 5px; cursor: pointer; font-size: 11px; transition: all 0.2s; }
+  .btn { background: none; border: 1px solid #2a2b30; color: #a8a79d; padding: 5px 10px; border-radius: 5px; cursor: pointer; font-size: 11px; transition: all 0.2s; }
   .btn:hover { border-color: #5f5e5a; color: #d1d0c7; }
-  .btn.danger:hover { border-color: #A32D2D; color: #F09595; }
+  .btn:focus-visible { outline: 2px solid #6FD8B4; outline-offset: 1px; }
+  .btn.danger:hover { border-color: #C84545; color: #FFB5B5; }
   .btn.primary { border-color: #0F6E56; color: #9fe1cb; }
   .btn.primary:hover { border-color: #14856a; color: #e1f5ee; background: rgba(15,110,86,0.1); }
 
   .sync-row { display: flex; align-items: center; gap: 8px; padding: 8px 0; font-size: 11px; }
   .sync-dot { width: 8px; height: 8px; border-radius: 50%; flex-shrink: 0; }
-  .sync-dot.off { background: #5f5e5a; }
-  .sync-dot.ok { background: #5DCAA5; }
-  .sync-dot.err { background: #E24B4A; }
-  .sync-dot.pending { background: #EF9F27; }
+  .sync-dot.off { background: #8a8983; }
+  .sync-dot.ok { background: #6FD8B4; }
+  .sync-dot.err { background: #EF6867; }
+  .sync-dot.pending { background: #F5B446; }
   .sync-text { flex: 1; color: #b4b2a9; }
-  .sync-meta { color: #5f5e5a; font-size: 10px; font-variant-numeric: tabular-nums; }
+  .sync-meta { color: #8a8983; font-size: 10px; font-variant-numeric: tabular-nums; }
+
+  @media (prefers-reduced-motion: reduce) {
+    .skeleton { animation: none; }
+  }
 </style>
 </head>
 <body>
 
 <div class="header">
-  <div class="header-icon">G</div>
+  <div class="header-icon" aria-hidden="true">G</div>
   <div>
     <h1>LLM Guard <span class="version">v2</span></h1>
-    <p>Multi-LLM — RGPD & AI Act</p>
+    <p data-i18n="popupTagline">Multi-LLM — GDPR & AI Act</p>
+  </div>
+  <div class="mode-badge" id="mode-badge" role="status" aria-live="polite" aria-label=""></div>
+</div>
+
+<div class="stats-grid" role="group" aria-live="polite">
+  <div class="stat-card">
+    <div class="stat-value v-green" id="s-total" aria-busy="true"><span class="skeleton"></span></div>
+    <div class="stat-label" data-i18n="statPrompts">Prompts</div>
+  </div>
+  <div class="stat-card">
+    <div class="stat-value v-teal" id="s-anon" aria-busy="true"><span class="skeleton"></span></div>
+    <div class="stat-label" data-i18n="statAnonymized">Anonymized</div>
+  </div>
+  <div class="stat-card">
+    <div class="stat-value v-amber" id="s-flag" aria-busy="true"><span class="skeleton"></span></div>
+    <div class="stat-label" data-i18n="statFlagged">Flagged</div>
+  </div>
+  <div class="stat-card">
+    <div class="stat-value v-red" id="s-block" aria-busy="true"><span class="skeleton"></span></div>
+    <div class="stat-label" data-i18n="statBlocked">Blocked</div>
   </div>
 </div>
 
-<div class="stats-grid">
+<div class="stats-grid" style="grid-template-columns: repeat(3, 1fr)" role="group" aria-live="polite">
   <div class="stat-card">
-    <div class="stat-value v-green" id="s-total">0</div>
-    <div class="stat-label">Prompts</div>
+    <div class="stat-value v-green" id="s-att-total" aria-busy="true"><span class="skeleton"></span></div>
+    <div class="stat-label" data-i18n="statAttachments">Attachments</div>
   </div>
   <div class="stat-card">
-    <div class="stat-value v-teal" id="s-anon">0</div>
-    <div class="stat-label">Anonymisés</div>
+    <div class="stat-value v-amber" id="s-att-flag" aria-busy="true"><span class="skeleton"></span></div>
+    <div class="stat-label" data-i18n="statAttachmentsFlagged">Flagged attach.</div>
   </div>
   <div class="stat-card">
-    <div class="stat-value v-amber" id="s-flag">0</div>
-    <div class="stat-label">Alertés</div>
-  </div>
-  <div class="stat-card">
-    <div class="stat-value v-red" id="s-block">0</div>
-    <div class="stat-label">Bloqués</div>
-  </div>
-</div>
-
-<div class="stats-grid" style="grid-template-columns: repeat(3, 1fr)">
-  <div class="stat-card">
-    <div class="stat-value v-green" id="s-att-total">0</div>
-    <div class="stat-label">Pièces jointes</div>
-  </div>
-  <div class="stat-card">
-    <div class="stat-value v-amber" id="s-att-flag">0</div>
-    <div class="stat-label">PJ alertées</div>
-  </div>
-  <div class="stat-card">
-    <div class="stat-value v-red" id="s-att-block">0</div>
-    <div class="stat-label">PJ bloquées</div>
+    <div class="stat-value v-red" id="s-att-block" aria-busy="true"><span class="skeleton"></span></div>
+    <div class="stat-label" data-i18n="statAttachmentsBlocked">Blocked attach.</div>
   </div>
 </div>
 
 <div class="section">
-  <div class="section-title">Mode de protection</div>
-  <div class="mode-toggle">
-    <button class="mode-btn" data-mode="anonymize">Anonymiser</button>
-    <button class="mode-btn" data-mode="visible">Visible</button>
-    <button class="mode-btn" data-mode="block">Bloquer</button>
+  <div class="section-title" data-i18n="sectionMode">Protection mode</div>
+  <div class="mode-toggle" role="radiogroup" aria-label="Protection mode">
+    <button class="mode-btn" data-mode="anonymize" role="radio" aria-checked="false" data-i18n="modeAnonymize">Anonymize</button>
+    <button class="mode-btn" data-mode="visible" role="radio" aria-checked="false" data-i18n="modeVisible">Visible</button>
+    <button class="mode-btn" data-mode="block" role="radio" aria-checked="false" data-i18n="modeBlock">Block</button>
   </div>
-  <div class="mode-help">
-    <div class="item"><b>Anonymiser</b> — les PII sont remplacées par des placeholders (<code>[EMAIL_1]</code>…) avant l'envoi au LLM. La réponse est automatiquement désanonymisée pour que vous lisiez les vraies valeurs.</div>
-    <div class="item"><b>Visible</b> — anonymisation identique en sortie, mais les placeholders restent affichés dans votre message et la réponse. Un bouton « Révéler les PII » permet de basculer l'affichage vers les vraies valeurs à la demande.</div>
-    <div class="item"><b>Bloquer</b> — un envoi contenant une PII critique est interrompu (HTTP 403 local). Rien n'est transmis au LLM.</div>
-  </div>
+  <details class="mode-help">
+    <summary data-i18n="sectionMode">Mode details</summary>
+    <div class="item"><b data-i18n="modeAnonymize">Anonymize</b> — <span data-i18n="modeHelpAnonymize"></span></div>
+    <div class="item"><b data-i18n="modeVisible">Visible</b> — <span data-i18n="modeHelpVisible"></span></div>
+    <div class="item"><b data-i18n="modeBlock">Block</b> — <span data-i18n="modeHelpBlock"></span></div>
+  </details>
 </div>
 
 <div class="section" id="llm-section" style="display:none">
-  <div class="section-title">Usage par LLM</div>
+  <div class="section-title" data-i18n="sectionLLMUsage">Usage by LLM</div>
   <div id="llm-bars"></div>
 </div>
 
 <div class="section" id="pii-section" style="display:none">
-  <div class="section-title">Détections par type</div>
+  <div class="section-title" data-i18n="sectionPIITypes">Detections by type</div>
   <div id="pii-bars"></div>
 </div>
 
 <div class="section">
-  <div class="section-title">Tableau de bord centralisé</div>
+  <div class="section-title" data-i18n="sectionDashboard">Central dashboard</div>
   <div class="sync-row">
-    <div class="sync-dot off" id="sync-dot"></div>
-    <div class="sync-text" id="sync-text">Désactivé</div>
+    <div class="sync-dot off" id="sync-dot" aria-hidden="true"></div>
+    <div class="sync-text" id="sync-text" data-i18n="syncDisabled">Disabled</div>
     <div class="sync-meta" id="sync-meta"></div>
   </div>
   <div style="display: flex; gap: 6px; margin-top: 6px;">
-    <button class="btn primary" id="btn-dashboard" style="flex:1">Ouvrir le dashboard ↗</button>
-    <button class="btn" id="btn-configure" style="flex:1">Configurer</button>
+    <button class="btn primary" id="btn-dashboard" style="flex:1" data-i18n="openDashboard">Open dashboard ↗</button>
+    <button class="btn" id="btn-configure" style="flex:1" data-i18n="configure">Configure</button>
   </div>
 </div>
 
 <div class="section">
-  <div class="section-title">Journal récent</div>
-  <div id="log-list">
-    <div class="empty-state">Aucune activité enregistrée.</div>
+  <div class="section-title" data-i18n="sectionLog">Recent activity</div>
+  <div class="log-filters" role="tablist" aria-label="Log filters">
+    <button class="log-filter active" data-filter="all" role="tab" aria-selected="true" data-i18n="filterAll">All</button>
+    <button class="log-filter" data-filter="blocked" role="tab" aria-selected="false" data-i18n="filterBlocked">Blocked</button>
+    <button class="log-filter" data-filter="flagged" role="tab" aria-selected="false" data-i18n="filterFlagged">Flagged</button>
+    <button class="log-filter" data-filter="anonymized" role="tab" aria-selected="false" data-i18n="filterAnonymized">Anonymized</button>
+  </div>
+  <div id="log-list" aria-live="polite">
+    <div class="empty-state" data-i18n="loading">Loading…</div>
   </div>
 </div>
 
 <div class="footer">
-  <button class="btn danger" id="btn-clear">Effacer</button>
-  <button class="btn" id="btn-export">Exporter JSON</button>
+  <button class="btn danger" id="btn-clear" data-i18n="btnClear" data-i18n-aria-label="btnClearAria">Clear</button>
+  <button class="btn" id="btn-export" data-i18n="btnExport" data-i18n-aria-label="btnExportAria">Export JSON</button>
 </div>
 
 <script src="popup.js"></script>

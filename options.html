@@ -1,8 +1,8 @@
 <!DOCTYPE html>
-<html lang="fr">
+<html lang="en">
 <head>
 <meta charset="UTF-8">
-<title>LLM Guard — Configuration</title>
+<title data-i18n="optsTitle">LLM Guard — Configuration</title>
 <style>
   * { margin: 0; padding: 0; box-sizing: border-box; }
   body {
@@ -24,19 +24,20 @@
   .panel { background: #14151a; border: 1px solid #1e1f23; border-top: none; border-radius: 0 0 10px 10px; padding: 24px; }
   .section { margin-bottom: 28px; }
   .section:last-child { margin-bottom: 0; }
-  .section-title { font-size: 12px; text-transform: uppercase; letter-spacing: 0.8px; color: #888780; margin-bottom: 12px; }
+  .section-title { font-size: 12px; text-transform: uppercase; letter-spacing: 0.8px; color: #a8a79d; margin-bottom: 12px; }
 
   label { display: block; margin-bottom: 16px; }
   label .lbl { display: block; font-size: 12px; color: #b4b2a9; margin-bottom: 6px; }
-  label .hint { display: block; font-size: 11px; color: #5f5e5a; margin-top: 5px; }
+  label .hint { display: block; font-size: 11px; color: #8a8983; margin-top: 5px; }
 
   input[type=text], input[type=url], input[type=email], input[type=password] {
     width: 100%; background: #0e0f11; border: 1px solid #2a2b30;
     border-radius: 6px; padding: 9px 11px; color: #d1d0c7;
     font-size: 13px; font-family: inherit;
   }
-  input:focus { outline: none; border-color: #0F6E56; }
-  input[readonly] { color: #5f5e5a; font-family: monospace; font-size: 12px; }
+  input:focus, button:focus, select:focus { outline: 2px solid #6FD8B4; outline-offset: 1px; border-color: #0F6E56; }
+  input:focus-visible, button:focus-visible, select:focus-visible { outline: 2px solid #6FD8B4; outline-offset: 1px; }
+  input[readonly] { color: #8a8983; font-family: monospace; font-size: 12px; }
 
   .toggle {
     display: flex; align-items: center; gap: 12px;
@@ -45,10 +46,26 @@
   }
   .toggle input { width: 16px; height: 16px; accent-color: #0F6E56; cursor: pointer; }
   .toggle-text strong { font-size: 13px; color: #d1d0c7; }
-  .toggle-text span { display: block; font-size: 11px; color: #888780; margin-top: 2px; }
+  .toggle-text span { display: block; font-size: 11px; color: #a8a79d; margin-top: 2px; }
 
   .row { display: flex; gap: 10px; align-items: center; }
   .row input { flex: 1; }
+
+  .input-with-toggle { position: relative; display: flex; align-items: stretch; }
+  .input-with-toggle input { padding-right: 70px; }
+  .input-with-toggle .peek {
+    position: absolute; right: 4px; top: 50%; transform: translateY(-50%);
+    background: transparent; border: 1px solid #2a2b30; color: #a8a79d;
+    padding: 4px 9px; border-radius: 4px; font-size: 11px; cursor: pointer;
+  }
+  .input-with-toggle .peek:hover { border-color: #5f5e5a; color: #d1d0c7; }
+
+  .inline-warning {
+    display: none; margin-top: 6px; padding: 7px 10px;
+    background: #4a2905; border: 1px solid #B45309; color: #FFD48A;
+    border-radius: 4px; font-size: 11px; line-height: 1.4;
+  }
+  .inline-warning.visible { display: block; }
 
   .footer { display: flex; justify-content: space-between; align-items: center; margin-top: 24px; padding-top: 20px; border-top: 1px solid #1e1f23; }
 
@@ -58,12 +75,12 @@
     transition: background 0.2s;
   }
   .btn:hover { background: #14856a; }
-  .btn.secondary { background: transparent; border: 1px solid #2a2b30; color: #888780; }
+  .btn.secondary { background: transparent; border: 1px solid #2a2b30; color: #a8a79d; }
   .btn.secondary:hover { border-color: #5f5e5a; color: #d1d0c7; background: transparent; }
 
-  .status { font-size: 12px; color: #5f5e5a; }
-  .status.ok { color: #5DCAA5; }
-  .status.err { color: #E24B4A; }
+  .status { font-size: 12px; color: #8a8983; }
+  .status.ok { color: #6FD8B4; }
+  .status.err { color: #EF6867; }
 
   .queue-row { display: flex; justify-content: space-between; padding: 8px 0; font-size: 12px; color: #b4b2a9; }
   .queue-row span:last-child { color: #d1d0c7; font-variant-numeric: tabular-nums; }
@@ -72,51 +89,55 @@
 <body>
 <main>
   <header>
-    <div class="header-icon">G</div>
+    <div class="header-icon" aria-hidden="true">G</div>
     <div>
-      <h1>LLM Guard — Configuration</h1>
-      <p>Connexion au tableau de bord centralisé</p>
+      <h1 data-i18n="optsTitle">LLM Guard — Configuration</h1>
+      <p data-i18n="optsSubtitle">Connection to central dashboard</p>
     </div>
   </header>
 
   <div class="panel">
 
     <div class="section">
-      <div class="section-title">Envoi au tableau de bord</div>
+      <div class="section-title" data-i18n="optsSectionTelemetry">Send to dashboard</div>
       <label class="toggle">
         <input type="checkbox" id="opt-enabled">
         <div class="toggle-text">
-          <strong>Activer l'envoi des métadonnées</strong>
-          <span>Désactivé par défaut. Seules les métadonnées et les aperçus anonymisés ([EMAIL_1]…) sont envoyés.</span>
+          <strong data-i18n="optsEnableTelemetry">Enable metadata upload</strong>
+          <span data-i18n="optsEnableTelemetryHint">Disabled by default. Only metadata and anonymized previews ([EMAIL_1]…) are sent.</span>
         </div>
       </label>
     </div>
 
     <div class="section">
-      <div class="section-title">Backend</div>
+      <div class="section-title" data-i18n="optsSectionBackend">Backend</div>
       <label>
-        <span class="lbl">URL du backend</span>
-        <input type="url" id="opt-backend-url" placeholder="https://dashboard.example.com" autocomplete="off">
-        <span class="hint">Endpoint HTTPS de votre instance auto-hébergée. Les évènements sont envoyés à <code>&lt;URL&gt;/v1/events</code>.</span>
+        <span class="lbl" data-i18n="optsBackendUrl">Backend URL</span>
+        <input type="url" id="opt-backend-url" placeholder="https://dashboard.example.com" autocomplete="off" aria-describedby="hint-backend-url backend-http-warning">
+        <span class="hint" id="hint-backend-url" data-i18n="optsBackendUrlHint">HTTPS endpoint of your self-hosted instance.</span>
+        <div class="inline-warning" id="backend-http-warning" role="alert" data-i18n="optsHttpWarning"></div>
       </label>
       <label>
-        <span class="lbl">Jeton de l'appareil</span>
-        <input type="password" id="opt-device-token" placeholder="Collez ici le jeton fourni par l'administrateur" autocomplete="off">
-        <span class="hint">Bearer token généré depuis le tableau de bord (page Devices → Rotate token).</span>
+        <span class="lbl" data-i18n="optsDeviceToken">Device token</span>
+        <div class="input-with-toggle">
+          <input type="password" id="opt-device-token" placeholder="Bearer token" autocomplete="off" aria-describedby="hint-device-token">
+          <button class="peek" id="btn-peek-token" type="button" aria-label="Show token" data-i18n="optsShowPassword">Show</button>
+        </div>
+        <span class="hint" id="hint-device-token" data-i18n="optsDeviceTokenHint">Bearer token generated from the dashboard.</span>
       </label>
     </div>
 
     <div class="section">
-      <div class="section-title">Organisation</div>
+      <div class="section-title" data-i18n="optsSectionOrg">Organization</div>
       <label>
-        <span class="lbl">Org ID</span>
-        <input type="text" id="opt-org-id" placeholder="acme" autocomplete="off">
-        <span class="hint">Identifiant de l'organisation. Communiqué par l'administrateur.</span>
+        <span class="lbl" data-i18n="optsOrgId">Org ID</span>
+        <input type="text" id="opt-org-id" placeholder="acme" autocomplete="off" aria-describedby="hint-org-id">
+        <span class="hint" id="hint-org-id" data-i18n="optsOrgIdHint">Organization identifier.</span>
       </label>
       <label>
-        <span class="lbl">Email utilisateur (optionnel)</span>
-        <input type="email" id="opt-user-hint" placeholder="alice@acme.com" autocomplete="off">
-        <span class="hint">Utilisé pour distinguer vos évènements dans le tableau de bord. Laissez vide pour rester anonyme.</span>
+        <span class="lbl" data-i18n="optsUserEmail">User email (optional)</span>
+        <input type="email" id="opt-user-hint" placeholder="alice@acme.com" autocomplete="off" aria-describedby="hint-user-email">
+        <span class="hint" id="hint-user-email" data-i18n="optsUserEmailHint">Used to distinguish your events in the dashboard.</span>
       </label>
     </div>
 
@@ -194,21 +215,21 @@
     </div>
 
     <div class="section">
-      <div class="section-title">Synchronisation</div>
-      <div class="queue-row"><span>Évènements en file</span><span id="q-count">0</span></div>
-      <div class="queue-row"><span>Dernier envoi</span><span id="q-last">Jamais</span></div>
-      <div class="queue-row"><span>Erreur</span><span id="q-err">—</span></div>
-      <div class="queue-row"><span>Événements perdus (file saturée)</span><span id="q-evicted">0</span></div>
-      <div class="queue-row"><span>Succès / tentatives</span><span id="q-flush-stats">0 / 0</span></div>
+      <div class="section-title" data-i18n="optsSectionSync">Synchronization</div>
+      <div class="queue-row"><span data-i18n="optsQueued">Queued events</span><span id="q-count">0</span></div>
+      <div class="queue-row"><span data-i18n="optsLastSend">Last send</span><span id="q-last" data-i18n="optsNever">Never</span></div>
+      <div class="queue-row"><span data-i18n="optsLastError">Error</span><span id="q-err">—</span></div>
+      <div class="queue-row"><span data-i18n="optsEvicted">Events dropped (outbox full)</span><span id="q-evicted">0</span></div>
+      <div class="queue-row"><span data-i18n="optsFlushStats">Successes / attempts</span><span id="q-flush-stats">0 / 0</span></div>
       <div class="row" style="margin-top: 12px;">
-        <button class="btn" id="btn-flush" type="button">Forcer la synchronisation</button>
-        <button class="btn secondary" id="btn-test" type="button">Tester la connexion</button>
+        <button class="btn" id="btn-flush" type="button" data-i18n="optsFlushNow">Force sync</button>
+        <button class="btn secondary" id="btn-test" type="button" data-i18n="optsTestConnection">Test connection</button>
       </div>
     </div>
 
     <div class="footer">
-      <span class="status" id="save-status"></span>
-      <button class="btn" id="btn-save" type="button">Enregistrer</button>
+      <span class="status" id="save-status" role="status" aria-live="polite"></span>
+      <button class="btn" id="btn-save" type="button" data-i18n="optsSave">Save</button>
     </div>
 
   </div>
