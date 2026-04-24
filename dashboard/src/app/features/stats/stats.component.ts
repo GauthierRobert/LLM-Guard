@@ -12,8 +12,6 @@ import {
 } from '@angular/core';
 import { takeUntilDestroyed } from '@angular/core/rxjs-interop';
 import { isPlatformBrowser } from '@angular/common';
-import { MatCardModule } from '@angular/material/card';
-import { MatIconModule } from '@angular/material/icon';
 
 import {
   ArcElement,
@@ -32,6 +30,7 @@ import {
 import { ApiService, TimeRange } from '../../core/api.service';
 import { ComplianceService } from '../../core/compliance.service';
 import { StatsResponse } from '../../core/schema.generated';
+import { IconComponent } from '../../shared/icon.component';
 
 Chart.register(
   ArcElement,
@@ -76,159 +75,142 @@ interface LlmSlice {
 @Component({
   selector: 'lg-stats',
   standalone: true,
-  imports: [MatCardModule, MatIconModule],
+  imports: [IconComponent],
   template: `
-    <header class="page-head">
-      <h1>Statistiques d'usage</h1>
-      <div class="range-tabs">
+    <header class="flex justify-between items-center mb-5">
+      <h1 class="text-[22px] font-semibold text-ink-50">Statistiques d'usage</h1>
+      <div class="inline-flex gap-1 bg-ink-800 border border-ink-700 p-[3px] rounded-lg">
         @for (r of ranges; track r) {
-          <button [class.active]="r === range()" (click)="setRange(r)">{{ r }}</button>
+          <button type="button" (click)="setRange(r)"
+                  class="px-3 py-1.5 rounded-md text-[12px] transition-colors"
+                  [class]="r === range() ? 'bg-brand-700 text-ink-50' : 'text-ink-300 hover:text-ink-100'">
+            {{ r }}
+          </button>
         }
       </div>
     </header>
 
     @if (stats(); as s) {
-      <section class="kpi-grid">
-        <mat-card>
-          <div class="kpi-label">Prompts totaux</div>
-          <div class="kpi-value v-green">{{ s.total }}</div>
-        </mat-card>
-        <mat-card>
-          <div class="kpi-label">LLM distincts</div>
-          <div class="kpi-value v-teal">{{ distinctLlms() }}</div>
-        </mat-card>
-        <mat-card>
-          <div class="kpi-label">Taux d'anonymisation</div>
-          <div class="kpi-value v-teal">{{ anonRate() }}%</div>
-        </mat-card>
-        <mat-card>
-          <div class="kpi-label">Taux de blocage</div>
-          <div class="kpi-value v-red">{{ blockRate() }}%</div>
-        </mat-card>
+      <section class="grid grid-cols-2 md:grid-cols-4 gap-3 mb-5">
+        <div class="bg-ink-800 border border-ink-700 rounded-xl p-4">
+          <div class="text-[11px] uppercase tracking-wide text-ink-300 font-semibold">Prompts totaux</div>
+          <div class="text-[28px] font-bold text-brand-500 tabular-nums mt-1">{{ s.total }}</div>
+        </div>
+        <div class="bg-ink-800 border border-ink-700 rounded-xl p-4">
+          <div class="text-[11px] uppercase tracking-wide text-ink-300 font-semibold">LLM distincts</div>
+          <div class="text-[28px] font-bold text-info-500 tabular-nums mt-1">{{ distinctLlms() }}</div>
+        </div>
+        <div class="bg-ink-800 border border-ink-700 rounded-xl p-4">
+          <div class="text-[11px] uppercase tracking-wide text-ink-300 font-semibold">Taux d'anonymisation</div>
+          <div class="text-[28px] font-bold text-info-500 tabular-nums mt-1">{{ anonRate() }}%</div>
+        </div>
+        <div class="bg-ink-800 border border-ink-700 rounded-xl p-4">
+          <div class="text-[11px] uppercase tracking-wide text-ink-300 font-semibold">Taux de blocage</div>
+          <div class="text-[28px] font-bold text-danger-500 tabular-nums mt-1">{{ blockRate() }}%</div>
+        </div>
       </section>
 
-      <section class="charts-grid">
-        <mat-card class="pane pie-pane">
-          <h2>Prompts par LLM</h2>
+      <section class="grid grid-cols-1 min-[1100px]:grid-cols-[1.3fr_1fr] gap-3 mb-3">
+        <div class="bg-ink-800 border border-ink-700 rounded-xl p-5">
+          <h2 class="text-[13px] uppercase tracking-wide text-ink-300 font-semibold mb-3.5">Prompts par LLM</h2>
           @if (llmSlices().length > 0) {
-            <div class="pie-wrap">
-              <div class="canvas-box">
+            <div class="grid grid-cols-1 sm:grid-cols-[minmax(180px,240px)_1fr] gap-5 items-center">
+              <div class="relative aspect-square min-h-[200px] [&>canvas]:!w-full [&>canvas]:!h-full">
                 <canvas #pieCanvas></canvas>
               </div>
-              <ul class="legend">
+              <ul class="list-none m-0 p-0 flex flex-col gap-1.5">
                 @for (slice of llmSlices(); track slice.name) {
-                  <li>
-                    <span class="dot" [style.background]="slice.color"></span>
-                    <span class="leg-name">{{ slice.name }}</span>
-                    <span class="leg-count">{{ slice.count }}</span>
-                    <span class="leg-pct">{{ slice.pct }}%</span>
+                  <li class="grid grid-cols-[12px_1fr_auto_auto] gap-2.5 items-center text-[12px] py-0.5">
+                    <span class="w-2.5 h-2.5 rounded-full inline-block" [style.background]="slice.color"></span>
+                    <span class="text-ink-100 whitespace-nowrap overflow-hidden text-ellipsis">{{ slice.name }}</span>
+                    <span class="text-ink-300 tabular-nums">{{ slice.count }}</span>
+                    <span class="text-brand-500 tabular-nums min-w-[44px] text-right">{{ slice.pct }}%</span>
                   </li>
                 }
               </ul>
             </div>
           } @else {
-            <p class="empty">Aucune donnée LLM pour cette période.</p>
+            <p class="text-ink-500 text-[12px]">Aucune donnée LLM pour cette période.</p>
           }
-        </mat-card>
+        </div>
 
-        <mat-card class="pane">
-          <h2>Répartition des actions</h2>
+        <div class="bg-ink-800 border border-ink-700 rounded-xl p-5">
+          <h2 class="text-[13px] uppercase tracking-wide text-ink-300 font-semibold mb-3.5">Répartition des actions</h2>
           @if (s.total > 0) {
-            <div class="doughnut-wrap">
-              <div class="canvas-box">
+            <div class="grid grid-cols-1 sm:grid-cols-[minmax(180px,240px)_1fr] gap-5 items-center">
+              <div class="relative aspect-square min-h-[200px] [&>canvas]:!w-full [&>canvas]:!h-full">
                 <canvas #actionsCanvas></canvas>
-                <div class="doughnut-center">
-                  <div class="dc-num">{{ s.total }}</div>
-                  <div class="dc-label">prompts</div>
+                <div class="absolute inset-0 flex flex-col items-center justify-center pointer-events-none">
+                  <div class="text-[26px] font-bold text-ink-50 tabular-nums">{{ s.total }}</div>
+                  <div class="text-[10px] uppercase text-ink-300 tracking-wide">prompts</div>
                 </div>
               </div>
-              <ul class="legend">
-                <li><span class="dot" [style.background]="actionColors.clean"></span><span class="leg-name">Propres</span><span class="leg-count">{{ s.clean }}</span><span class="leg-pct">{{ pct(s.clean, s.total) }}%</span></li>
-                <li><span class="dot" [style.background]="actionColors.anonymized"></span><span class="leg-name">Anonymisés</span><span class="leg-count">{{ s.anonymized }}</span><span class="leg-pct">{{ pct(s.anonymized, s.total) }}%</span></li>
-                <li><span class="dot" [style.background]="actionColors.flagged"></span><span class="leg-name">Alertés</span><span class="leg-count">{{ s.flagged }}</span><span class="leg-pct">{{ pct(s.flagged, s.total) }}%</span></li>
-                <li><span class="dot" [style.background]="actionColors.blocked"></span><span class="leg-name">Bloqués</span><span class="leg-count">{{ s.blocked }}</span><span class="leg-pct">{{ pct(s.blocked, s.total) }}%</span></li>
+              <ul class="list-none m-0 p-0 flex flex-col gap-1.5">
+                <li class="grid grid-cols-[12px_1fr_auto_auto] gap-2.5 items-center text-[12px] py-0.5">
+                  <span class="w-2.5 h-2.5 rounded-full inline-block" [style.background]="actionColors.clean"></span>
+                  <span class="text-ink-100">Propres</span>
+                  <span class="text-ink-300 tabular-nums">{{ s.clean }}</span>
+                  <span class="text-brand-500 tabular-nums min-w-[44px] text-right">{{ pct(s.clean, s.total) }}%</span>
+                </li>
+                <li class="grid grid-cols-[12px_1fr_auto_auto] gap-2.5 items-center text-[12px] py-0.5">
+                  <span class="w-2.5 h-2.5 rounded-full inline-block" [style.background]="actionColors.anonymized"></span>
+                  <span class="text-ink-100">Anonymisés</span>
+                  <span class="text-ink-300 tabular-nums">{{ s.anonymized }}</span>
+                  <span class="text-brand-500 tabular-nums min-w-[44px] text-right">{{ pct(s.anonymized, s.total) }}%</span>
+                </li>
+                <li class="grid grid-cols-[12px_1fr_auto_auto] gap-2.5 items-center text-[12px] py-0.5">
+                  <span class="w-2.5 h-2.5 rounded-full inline-block" [style.background]="actionColors.flagged"></span>
+                  <span class="text-ink-100">Alertés</span>
+                  <span class="text-ink-300 tabular-nums">{{ s.flagged }}</span>
+                  <span class="text-brand-500 tabular-nums min-w-[44px] text-right">{{ pct(s.flagged, s.total) }}%</span>
+                </li>
+                <li class="grid grid-cols-[12px_1fr_auto_auto] gap-2.5 items-center text-[12px] py-0.5">
+                  <span class="w-2.5 h-2.5 rounded-full inline-block" [style.background]="actionColors.blocked"></span>
+                  <span class="text-ink-100">Bloqués</span>
+                  <span class="text-ink-300 tabular-nums">{{ s.blocked }}</span>
+                  <span class="text-brand-500 tabular-nums min-w-[44px] text-right">{{ pct(s.blocked, s.total) }}%</span>
+                </li>
               </ul>
             </div>
           } @else {
-            <p class="empty">Aucune donnée pour cette période.</p>
+            <p class="text-ink-500 text-[12px]">Aucune donnée pour cette période.</p>
           }
-        </mat-card>
+        </div>
       </section>
 
-      <mat-card class="pane">
-        <h2>Top 10 types de PII détectés</h2>
+      <div class="bg-ink-800 border border-ink-700 rounded-xl p-5">
+        <h2 class="text-[13px] uppercase tracking-wide text-ink-300 font-semibold mb-3.5">Top 10 types de PII détectés</h2>
         @if (typeEntries().length > 0) {
-          <div class="bar-box">
+          <div class="relative h-80 [&>canvas]:!w-full [&>canvas]:!h-full">
             <canvas #typesCanvas></canvas>
           </div>
         } @else {
-          <p class="empty">Aucune détection de PII pour cette période.</p>
+          <p class="text-ink-500 text-[12px]">Aucune détection de PII pour cette période.</p>
         }
-      </mat-card>
+      </div>
     } @else if (loaded() && !hasData()) {
-      <mat-card class="empty-state">
-        <mat-icon class="empty-icon">insights</mat-icon>
-        <h2>Aucune télémétrie encore reçue</h2>
-        <p>Le backend est opérationnel mais aucun événement n'a été ingéré pour cette période. Deux options&nbsp;:</p>
-        <ol>
-          <li>Activez l'extension&nbsp;: <code>chrome-extension://…/options.html</code> → cochez <em>Enabled</em>, backend <code>http://localhost</code>, org <code>default</code>.</li>
-          <li>Chargez des données de démonstration&nbsp;: <code>bash infra/seed-demo.sh</code>.</li>
+      <div class="bg-ink-800 border border-dashed border-ink-700 rounded-xl p-8 text-center">
+        <lg-icon name="table_chart" [size]="48" class="text-brand-700 mx-auto mb-3"/>
+        <h2 class="text-ink-50 text-[16px] font-semibold mb-2">Aucune télémétrie encore reçue</h2>
+        <p class="text-ink-300 text-[13px] mx-auto max-w-[560px] mb-3">
+          Le backend est opérationnel mais aucun événement n'a été ingéré pour cette période. Deux options&nbsp;:
+        </p>
+        <ol class="text-ink-100 text-[12px] text-left mx-auto max-w-[560px] list-decimal pl-5 space-y-1">
+          <li>Activez l'extension&nbsp;:
+            <code class="bg-ink-900 px-1.5 py-0.5 rounded font-mono text-[11px]">chrome-extension://…/options.html</code>
+            → cochez <em class="not-italic text-brand-500">Enabled</em>, backend
+            <code class="bg-ink-900 px-1.5 py-0.5 rounded font-mono text-[11px]">http://localhost</code>, org
+            <code class="bg-ink-900 px-1.5 py-0.5 rounded font-mono text-[11px]">default</code>.
+          </li>
+          <li>Chargez des données de démonstration&nbsp;:
+            <code class="bg-ink-900 px-1.5 py-0.5 rounded font-mono text-[11px]">bash infra/seed-demo.sh</code>.
+          </li>
         </ol>
-      </mat-card>
+      </div>
     } @else {
-      <p class="empty">Chargement…</p>
+      <p class="text-ink-500 text-[12px]">Chargement…</p>
     }
   `,
-  styles: [
-    `
-      .page-head { display: flex; justify-content: space-between; align-items: center; margin-bottom: 18px; }
-      h1 { font-size: 22px; font-weight: 600; color: #e1f5ee; }
-      .range-tabs { display: flex; gap: 4px; background: #14151a; padding: 3px; border-radius: 8px; }
-      .range-tabs button { background: transparent; border: none; color: #888780; padding: 6px 12px; font-size: 12px; border-radius: 6px; cursor: pointer; }
-      .range-tabs button.active { background: #0F6E56; color: #e1f5ee; }
-
-      .kpi-grid { display: grid; grid-template-columns: repeat(4, 1fr); gap: 12px; margin-bottom: 18px; }
-      .kpi-label { font-size: 11px; text-transform: uppercase; color: #888780; letter-spacing: 0.6px; }
-      .kpi-value { font-size: 28px; font-weight: 700; margin-top: 4px; font-variant-numeric: tabular-nums; }
-      .v-green { color: #5DCAA5; } .v-teal { color: #85B7EB; } .v-amber { color: #EF9F27; } .v-red { color: #E24B4A; }
-
-      .charts-grid { display: grid; grid-template-columns: 1.3fr 1fr; gap: 12px; margin-bottom: 12px; }
-      @media (max-width: 1100px) { .charts-grid { grid-template-columns: 1fr; } }
-
-      .pane { padding: 18px; }
-      .pane h2 { font-size: 13px; text-transform: uppercase; color: #888780; letter-spacing: 0.6px; margin: 0 0 14px; }
-
-      .pie-wrap, .doughnut-wrap { display: grid; grid-template-columns: minmax(180px, 240px) 1fr; gap: 20px; align-items: center; }
-      @media (max-width: 640px) { .pie-wrap, .doughnut-wrap { grid-template-columns: 1fr; } }
-
-      .canvas-box { position: relative; aspect-ratio: 1 / 1; min-height: 200px; }
-      .canvas-box canvas { width: 100% !important; height: 100% !important; }
-
-      .doughnut-center { position: absolute; inset: 0; display: flex; flex-direction: column; align-items: center; justify-content: center; pointer-events: none; }
-      .dc-num { font-size: 26px; font-weight: 700; color: #e1f5ee; font-variant-numeric: tabular-nums; }
-      .dc-label { font-size: 10px; text-transform: uppercase; color: #888780; letter-spacing: 0.6px; }
-
-      .legend { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 6px; }
-      .legend li { display: grid; grid-template-columns: 12px 1fr auto auto; gap: 10px; align-items: center; font-size: 12px; padding: 2px 0; }
-      .dot { width: 10px; height: 10px; border-radius: 50%; display: inline-block; }
-      .leg-name { color: #d1d0c7; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
-      .leg-count { color: #888780; font-variant-numeric: tabular-nums; }
-      .leg-pct { color: #5DCAA5; font-variant-numeric: tabular-nums; min-width: 44px; text-align: right; }
-
-      .bar-box { position: relative; height: 320px; }
-      .bar-box canvas { width: 100% !important; height: 100% !important; }
-
-      .empty { color: #5f5e5a; font-size: 12px; }
-      .empty-state { padding: 32px; text-align: center; border: 1px dashed #1e1f23; }
-      .empty-state .empty-icon { font-size: 48px; width: 48px; height: 48px; color: #0F6E56; margin-bottom: 12px; }
-      .empty-state h2 { color: #e1f5ee; font-size: 16px; margin: 0 0 8px; }
-      .empty-state p { color: #888780; font-size: 13px; margin: 4px auto 12px; max-width: 560px; }
-      .empty-state ol { color: #d1d0c7; font-size: 12px; text-align: left; max-width: 560px; margin: 0 auto; padding-left: 20px; }
-      .empty-state li { margin: 4px 0; }
-      .empty-state code { background: #14151a; padding: 2px 6px; border-radius: 4px; font-family: ui-monospace, monospace; font-size: 11px; }
-      .empty-state em { color: #5DCAA5; font-style: normal; }
-    `,
-  ],
 })
 export class StatsComponent implements AfterViewInit {
   private readonly api = inject(ApiService);
