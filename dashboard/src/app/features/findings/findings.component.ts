@@ -1,10 +1,9 @@
-import { Component, computed, inject, signal } from '@angular/core';
-import { MatCardModule } from '@angular/material/card';
-import { MatIconModule } from '@angular/material/icon';
+import { Component, computed, inject } from '@angular/core';
 import { RouterLink } from '@angular/router';
 
 import { ComplianceService } from '../../core/compliance.service';
 import { ComplianceArticle, FINDING_TYPE_TO_ARTICLES } from '../../core/compliance.data';
+import { IconComponent } from '../../shared/icon.component';
 
 interface FindingRow {
   type: string;
@@ -13,106 +12,94 @@ interface FindingRow {
   severity: 'critical' | 'high' | 'medium' | 'low';
 }
 
+const SEV_CLASS: Record<FindingRow['severity'], string> = {
+  critical: 'bg-danger-800 text-danger-300',
+  high:     'bg-high-900 text-high-300',
+  medium:   'bg-warn-900 text-warn-300',
+  low:      'bg-info-900 text-info-500',
+};
+
+const SEV_LABEL: Record<FindingRow['severity'], string> = {
+  critical: 'Critique',
+  high:     'Élevée',
+  medium:   'Moyenne',
+  low:      'Faible',
+};
+
 @Component({
   selector: 'lg-findings',
   standalone: true,
-  imports: [MatCardModule, MatIconModule, RouterLink],
+  imports: [RouterLink, IconComponent],
   template: `
-    <header class="page-head">
-      <div>
-        <h1>Détections</h1>
-        <p class="sub">Chaque type de donnée détecté relié à son fondement juridique (RGPD / IA Act).</p>
-      </div>
+    <header class="mb-5">
+      <h1 class="text-[22px] font-semibold text-ink-50">Détections</h1>
+      <p class="text-ink-300 text-[13px] mt-1">Chaque type de donnée détecté relié à son fondement juridique (RGPD / IA Act).</p>
     </header>
 
-    <mat-card class="summary">
-      <div class="sum-item">
-        <div class="sum-label">Types détectés</div>
-        <div class="sum-value">{{ rows().length }}</div>
+    <section class="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-3 mb-4">
+      <div class="bg-ink-800 border border-ink-700 rounded-xl p-4">
+        <div class="text-[10px] uppercase tracking-wide text-ink-300 font-semibold">Types détectés</div>
+        <div class="text-[28px] font-bold text-ink-50 tabular-nums mt-1">{{ rows().length }}</div>
       </div>
-      <div class="sum-item">
-        <div class="sum-label">Données Art. 9 RGPD</div>
-        <div class="sum-value v-red">{{ art9Count() }}</div>
-        <div class="sum-sub">Catégories particulières</div>
+      <div class="bg-ink-800 border border-ink-700 rounded-xl p-4">
+        <div class="text-[10px] uppercase tracking-wide text-ink-300 font-semibold">Données Art. 9 RGPD</div>
+        <div class="text-[28px] font-bold text-danger-300 tabular-nums mt-1">{{ art9Count() }}</div>
+        <div class="text-[10px] text-ink-500 mt-0.5">Catégories particulières</div>
       </div>
-      <div class="sum-item">
-        <div class="sum-label">Signaux IA Act</div>
-        <div class="sum-value v-purple">{{ aiActCount() }}</div>
-        <div class="sum-sub">Signalements liés à l'Annexe III / Art. 5</div>
+      <div class="bg-ink-800 border border-ink-700 rounded-xl p-4">
+        <div class="text-[10px] uppercase tracking-wide text-ink-300 font-semibold">Signaux IA Act</div>
+        <div class="text-[28px] font-bold text-ai-500 tabular-nums mt-1">{{ aiActCount() }}</div>
+        <div class="text-[10px] text-ink-500 mt-0.5">Annexe III / Art. 5</div>
       </div>
-      <div class="sum-item">
-        <div class="sum-label">Occurrences totales</div>
-        <div class="sum-value v-teal">{{ totalOcc() }}</div>
+      <div class="bg-ink-800 border border-ink-700 rounded-xl p-4">
+        <div class="text-[10px] uppercase tracking-wide text-ink-300 font-semibold">Occurrences totales</div>
+        <div class="text-[28px] font-bold text-brand-500 tabular-nums mt-1">{{ totalOcc() }}</div>
       </div>
-    </mat-card>
+    </section>
 
-    <mat-card class="pane">
-      <table class="tbl">
-        <thead>
-          <tr>
-            <th>Type</th>
-            <th class="num">Occurrences</th>
-            <th>Sévérité</th>
-            <th>Fondement juridique</th>
-          </tr>
-        </thead>
-        <tbody>
-          @for (row of rows(); track row.type) {
-            <tr>
-              <td class="bold">{{ row.type }}</td>
-              <td class="num">{{ row.count }}</td>
-              <td><span class="chip" [class]="'sev-' + row.severity">{{ labelSev(row.severity) }}</span></td>
-              <td class="chips-cell">
-                @for (a of row.articles; track a.id) {
-                  <a class="leg-chip" [class.ai]="a.framework === 'AI_ACT'" [routerLink]="'/compliance'"
-                     [attr.title]="a.summary">
-                    <mat-icon>{{ a.framework === 'GDPR' ? 'gavel' : 'smart_toy' }}</mat-icon>
-                    <span>{{ a.framework === 'GDPR' ? 'RGPD' : 'IA Act' }} · {{ a.number }}</span>
-                  </a>
-                }
-              </td>
+    <div class="bg-ink-800 border border-ink-700 rounded-xl overflow-hidden">
+      <div class="overflow-x-auto">
+        <table class="w-full text-[13px]">
+          <thead>
+            <tr class="bg-ink-900/50 border-b border-ink-700">
+              <th class="text-left px-4 py-3 text-[10px] uppercase tracking-wide text-ink-300 font-semibold">Type</th>
+              <th class="text-right px-4 py-3 text-[10px] uppercase tracking-wide text-ink-300 font-semibold w-32">Occurrences</th>
+              <th class="text-left px-4 py-3 text-[10px] uppercase tracking-wide text-ink-300 font-semibold">Sévérité</th>
+              <th class="text-left px-4 py-3 text-[10px] uppercase tracking-wide text-ink-300 font-semibold">Fondement juridique</th>
             </tr>
-          } @empty {
-            <tr><td colspan="4" class="empty">Aucune détection sur la période.</td></tr>
-          }
-        </tbody>
-      </table>
-    </mat-card>
+          </thead>
+          <tbody>
+            @for (row of rows(); track row.type) {
+              <tr class="border-b border-ink-700 hover:bg-ink-900/40 transition-colors">
+                <td class="px-4 py-3 font-mono font-semibold text-ink-50">{{ row.type }}</td>
+                <td class="px-4 py-3 text-right tabular-nums text-ink-100">{{ row.count }}</td>
+                <td class="px-4 py-3">
+                  <span class="inline-block px-2.5 py-0.5 rounded-full text-[10px] font-semibold uppercase tracking-wide"
+                        [class]="sevClass(row.severity)">{{ sevLabel(row.severity) }}</span>
+                </td>
+                <td class="px-4 py-3">
+                  <div class="flex flex-wrap gap-1.5">
+                    @for (a of row.articles; track a.id) {
+                      <a [routerLink]="'/compliance'" [attr.title]="a.summary"
+                         class="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full text-[11px] border border-transparent transition-colors"
+                         [class]="a.framework === 'AI_ACT'
+                           ? 'bg-ai-900 text-ai-500 hover:border-ai-500'
+                           : 'bg-info-900 text-info-500 hover:border-info-500'">
+                        <lg-icon [name]="a.framework === 'GDPR' ? 'gavel' : 'smart_toy'" [size]="12"/>
+                        <span>{{ a.framework === 'GDPR' ? 'RGPD' : 'IA Act' }} · {{ a.number }}</span>
+                      </a>
+                    }
+                  </div>
+                </td>
+              </tr>
+            } @empty {
+              <tr><td colspan="4" class="py-10 text-center text-ink-500 text-[13px]">Aucune détection sur la période.</td></tr>
+            }
+          </tbody>
+        </table>
+      </div>
+    </div>
   `,
-  styles: [
-    `
-      .page-head { margin-bottom: 18px; }
-      h1 { font-size: 22px; font-weight: 600; color: #e1f5ee; }
-      .sub { color: #888780; font-size: 13px; margin-top: 4px; }
-
-      .summary { display: grid; grid-template-columns: repeat(4, 1fr); padding: 18px; gap: 14px; margin-bottom: 14px; }
-      .sum-label { font-size: 11px; text-transform: uppercase; color: #888780; letter-spacing: 0.6px; }
-      .sum-value { font-size: 28px; font-weight: 700; margin-top: 4px; font-variant-numeric: tabular-nums; color: #e1f5ee; }
-      .sum-sub { font-size: 10px; color: #5f5e5a; margin-top: 2px; }
-      .v-teal { color: #5DCAA5; } .v-red { color: #F09595; } .v-purple { color: #c4a6ff; }
-
-      .pane { padding: 0; overflow: hidden; }
-      .tbl { width: 100%; border-collapse: collapse; font-size: 13px; }
-      .tbl th { text-align: left; padding: 12px 14px; color: #888780; text-transform: uppercase; font-size: 10px; letter-spacing: 0.6px; border-bottom: 1px solid #1e1f23; }
-      .tbl td { padding: 12px 14px; border-bottom: 1px solid #1e1f23; color: #d1d0c7; vertical-align: middle; }
-      .tbl .num { font-variant-numeric: tabular-nums; text-align: right; width: 120px; }
-      .tbl .bold { font-weight: 600; color: #e1f5ee; font-family: ui-monospace, monospace; }
-      .empty { color: #5f5e5a; text-align: center; padding: 40px 0; }
-
-      .chip { padding: 2px 10px; border-radius: 10px; font-size: 10px; font-weight: 600; text-transform: uppercase; letter-spacing: 0.5px; }
-      .sev-critical { background: #501313; color: #F09595; }
-      .sev-high { background: #4A1B0C; color: #F0997B; }
-      .sev-medium { background: #412402; color: #FAC775; }
-      .sev-low { background: #042C53; color: #85B7EB; }
-
-      .chips-cell { display: flex; flex-wrap: wrap; gap: 6px; }
-      .leg-chip { display: inline-flex; align-items: center; gap: 4px; background: #042C53; color: #85B7EB; font-size: 11px; padding: 3px 10px; border-radius: 10px; text-decoration: none; border: 1px solid transparent; transition: border-color 0.15s; cursor: pointer; }
-      .leg-chip:hover { border-color: #85B7EB; }
-      .leg-chip.ai { background: #2a1b42; color: #c4a6ff; }
-      .leg-chip.ai:hover { border-color: #c4a6ff; }
-      .leg-chip mat-icon { font-size: 13px; width: 13px; height: 13px; }
-    `,
-  ],
 })
 export class FindingsComponent {
   private readonly svc = inject(ComplianceService);
@@ -143,14 +130,8 @@ export class FindingsComponent {
     this.svc.loadStats('30d').subscribe();
   }
 
-  protected labelSev(s: FindingRow['severity']): string {
-    switch (s) {
-      case 'critical': return 'Critique';
-      case 'high': return 'Élevée';
-      case 'medium': return 'Moyenne';
-      case 'low': return 'Faible';
-    }
-  }
+  protected sevClass(s: FindingRow['severity']): string { return SEV_CLASS[s]; }
+  protected sevLabel(s: FindingRow['severity']): string { return SEV_LABEL[s]; }
 
   private severityFor(type: string): FindingRow['severity'] {
     const ids = FINDING_TYPE_TO_ARTICLES[type.toLowerCase()] ?? [];

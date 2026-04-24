@@ -1,13 +1,29 @@
 {
-  # Local dev: serve over plain HTTP on :80 (no TLS, no public domain).
-  # For production, replace :80 with your domain (e.g. dashboard.example.com)
-  # and uncomment the email line so Caddy can obtain Let's Encrypt certs.
-  # email ops@example.com
-  auto_https off
+  # Self-signed TLS. For public deployments replace the tls line with a
+  # domain + email so Caddy obtains Let's Encrypt certificates automatically.
+  auto_https disable_redirects
 }
 
+# HTTP → HTTPS redirect
 :80 {
+  redir https://{host}{uri} permanent
+}
+
+# TLS front door (dashboard, API, Keycloak, Presidio proxy)
+https://llm-guard.local, https://localhost, https://127.0.0.1 {
+  tls /certs/server.crt /certs/server.key
+
   encode zstd gzip
+
+  # Presidio analyzer — internal HTTP, TLS terminates here.
+  handle_path /presidio/analyzer/* {
+    reverse_proxy presidio-analyzer:3000
+  }
+
+  # Presidio anonymizer
+  handle_path /presidio/anonymizer/* {
+    reverse_proxy presidio-anonymizer:3000
+  }
 
   # API + WebSockets live stream (strip /api prefix before forwarding)
   handle_path /api/* {

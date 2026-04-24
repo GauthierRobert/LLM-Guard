@@ -32,7 +32,10 @@
       "Bash(curl -sS -o /dev/null -w \"POST /api/v1/events  → %{http_code}\\\\n\" -X POST http://localhost/api/v1/events -H \"Content-Type: application/json\" -d '{}')",
       "Bash(openssl dgst *)",
       "Bash(curl -sS -X POST http://localhost:5001/analyze -H \"Content-Type: application/json\" -d '{\"text\":\"Contact me at john.doe@example.com or +33612345678\",\"language\":\"en\"}')",
-      "Bash(curl -fsS http://localhost/api/v1/health)"
+      "Bash(curl -fsS http://localhost/api/v1/health)",
+      "Bash(rm -f package-lock.json)",
+      "Bash(npm install *)",
+      "Bash(npx ng *)"
     ]
   }
 }

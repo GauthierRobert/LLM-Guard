@@ -1,115 +1,92 @@
 import { Component, DestroyRef, inject, signal } from '@angular/core';
 import { takeUntilDestroyed } from '@angular/core/rxjs-interop';
 import { DatePipe } from '@angular/common';
-import { MatButtonModule } from '@angular/material/button';
-import { MatCardModule } from '@angular/material/card';
-import { MatChipsModule } from '@angular/material/chips';
-import { MatIconModule } from '@angular/material/icon';
-import { MatProgressSpinnerModule } from '@angular/material/progress-spinner';
-import { MatTableModule } from '@angular/material/table';
 
 import { ApiService, DeviceRow } from '../../core/api.service';
+import { IconComponent } from '../../shared/icon.component';
 
 @Component({
   selector: 'lg-devices',
   standalone: true,
-  imports: [DatePipe, MatButtonModule, MatCardModule, MatChipsModule, MatIconModule, MatProgressSpinnerModule, MatTableModule],
+  imports: [DatePipe, IconComponent],
   template: `
-    <header class="page-head">
+    <header class="flex justify-between items-start mb-5 gap-4">
       <div>
-        <h1>Appareils</h1>
-        <p class="sub">Flotte active, dernière activité, révocation des jetons.</p>
+        <h1 class="text-[22px] font-semibold text-ink-50">Appareils</h1>
+        <p class="text-ink-300 text-[13px] mt-1">Flotte active, dernière activité, révocation des jetons.</p>
       </div>
-      <button mat-stroked-button (click)="refresh()" [disabled]="loading()">
-        <mat-icon>refresh</mat-icon> Rafraîchir
+      <button type="button" (click)="refresh()" [disabled]="loading()"
+              class="inline-flex items-center gap-2 px-3 py-2 rounded-lg border border-ink-700 text-ink-100 text-[13px] hover:border-brand-700 hover:bg-brand-700/10 disabled:opacity-50 transition-colors">
+        <lg-icon name="refresh" [size]="16"/> Rafraîchir
       </button>
     </header>
 
-    <mat-card class="pane">
+    <div class="bg-ink-800 border border-ink-700 rounded-xl overflow-hidden">
       @if (loading()) {
-        <div class="state"><mat-spinner diameter="28"></mat-spinner><span>Chargement…</span></div>
+        <div class="flex items-center justify-center gap-3 py-12 text-ink-300 text-[13px]">
+          <span class="inline-block w-5 h-5 border-2 border-ink-600 border-t-brand-500 rounded-full animate-spin"></span>
+          <span>Chargement…</span>
+        </div>
       } @else if (error()) {
-        <div class="state err">
-          <mat-icon>error_outline</mat-icon>
+        <div class="flex items-center justify-center gap-3 py-12 text-ink-300 text-[13px]">
+          <lg-icon name="error_outline" [size]="24" class="text-danger-500"/>
           <span>{{ error() }}</span>
         </div>
       } @else if (rows().length === 0) {
-        <div class="state">
-          <mat-icon>devices</mat-icon>
-          <span>Aucun appareil enregistré — activez la télémétrie dans l'extension, ou lancez <code>bash infra/seed-demo.sh</code>.</span>
+        <div class="flex items-center justify-center gap-3 py-12 text-ink-300 text-[13px] text-center px-4">
+          <lg-icon name="devices" [size]="28" class="text-brand-700"/>
+          <span>Aucun appareil enregistré — activez la télémétrie dans l'extension et configurez-la avec <code class="bg-ink-900 px-1.5 py-0.5 rounded font-mono text-[11px]">https://localhost</code> + jeton fourni par l'administrateur.</span>
         </div>
       } @else {
-        <table mat-table [dataSource]="rows()">
-          <ng-container matColumnDef="userHint">
-            <th mat-header-cell *matHeaderCellDef>Utilisateur</th>
-            <td mat-cell *matCellDef="let r">{{ r.userHint || '—' }}</td>
-          </ng-container>
-          <ng-container matColumnDef="id">
-            <th mat-header-cell *matHeaderCellDef>Device ID</th>
-            <td mat-cell *matCellDef="let r" class="mono">{{ shortId(r.id) }}</td>
-          </ng-container>
-          <ng-container matColumnDef="extensionVersion">
-            <th mat-header-cell *matHeaderCellDef>Version</th>
-            <td mat-cell *matCellDef="let r">{{ r.extensionVersion || '—' }}</td>
-          </ng-container>
-          <ng-container matColumnDef="lastSeenAt">
-            <th mat-header-cell *matHeaderCellDef>Dernière activité</th>
-            <td mat-cell *matCellDef="let r">{{ r.lastSeenAt ? (r.lastSeenAt | date: 'short') : 'jamais' }}</td>
-          </ng-container>
-          <ng-container matColumnDef="eventCount24h">
-            <th mat-header-cell *matHeaderCellDef class="num">Évèn. 24h</th>
-            <td mat-cell *matCellDef="let r" class="num">{{ r.eventCount24h }}</td>
-          </ng-container>
-          <ng-container matColumnDef="status">
-            <th mat-header-cell *matHeaderCellDef>Statut</th>
-            <td mat-cell *matCellDef="let r">
-              @if (r.revoked) {
-                <mat-chip class="chip-revoked">Révoqué</mat-chip>
-              } @else {
-                <mat-chip class="chip-ok">Actif</mat-chip>
+        <div class="overflow-x-auto">
+          <table class="w-full text-[13px]">
+            <thead>
+              <tr class="bg-ink-900/50 border-b border-ink-700">
+                <th class="text-left px-4 py-3 text-[10px] uppercase tracking-wide text-ink-300 font-semibold">Utilisateur</th>
+                <th class="text-left px-4 py-3 text-[10px] uppercase tracking-wide text-ink-300 font-semibold">Device ID</th>
+                <th class="text-left px-4 py-3 text-[10px] uppercase tracking-wide text-ink-300 font-semibold">Version</th>
+                <th class="text-left px-4 py-3 text-[10px] uppercase tracking-wide text-ink-300 font-semibold">Dernière activité</th>
+                <th class="text-right px-4 py-3 text-[10px] uppercase tracking-wide text-ink-300 font-semibold">Évèn. 24h</th>
+                <th class="text-left px-4 py-3 text-[10px] uppercase tracking-wide text-ink-300 font-semibold">Statut</th>
+                <th class="px-4 py-3"></th>
+              </tr>
+            </thead>
+            <tbody>
+              @for (r of rows(); track r.id) {
+                <tr class="border-b border-ink-700 hover:bg-ink-900/40 transition-colors" [class.opacity-55]="r.revoked">
+                  <td class="px-4 py-3 text-ink-100">{{ r.userHint || '—' }}</td>
+                  <td class="px-4 py-3 text-ink-100 font-mono">{{ shortId(r.id) }}</td>
+                  <td class="px-4 py-3 text-ink-100">{{ r.extensionVersion || '—' }}</td>
+                  <td class="px-4 py-3 text-ink-100">{{ r.lastSeenAt ? (r.lastSeenAt | date: 'short') : 'jamais' }}</td>
+                  <td class="px-4 py-3 text-right font-mono tabular-nums text-ink-100">{{ r.eventCount24h }}</td>
+                  <td class="px-4 py-3">
+                    @if (r.revoked) {
+                      <span class="inline-block px-2.5 py-0.5 rounded-full text-[10px] font-semibold bg-danger-800 text-danger-300 uppercase tracking-wide">Révoqué</span>
+                    } @else {
+                      <span class="inline-block px-2.5 py-0.5 rounded-full text-[10px] font-semibold bg-clean-900 text-brand-300 uppercase tracking-wide">Actif</span>
+                    }
+                  </td>
+                  <td class="px-4 py-3 text-right">
+                    @if (!r.revoked) {
+                      <button type="button" (click)="revoke(r)" [disabled]="revoking() === r.id"
+                              class="text-[12px] text-danger-300 hover:text-danger-500 disabled:opacity-50 font-medium">
+                        {{ revoking() === r.id ? 'Révocation…' : 'Révoquer' }}
+                      </button>
+                    }
+                  </td>
+                </tr>
               }
-            </td>
-          </ng-container>
-          <ng-container matColumnDef="actions">
-            <th mat-header-cell *matHeaderCellDef></th>
-            <td mat-cell *matCellDef="let r">
-              @if (!r.revoked) {
-                <button mat-button color="warn" (click)="revoke(r)" [disabled]="revoking() === r.id">
-                  {{ revoking() === r.id ? 'Révocation…' : 'Révoquer' }}
-                </button>
-              }
-            </td>
-          </ng-container>
-          <tr mat-header-row *matHeaderRowDef="cols"></tr>
-          <tr mat-row *matRowDef="let r; columns: cols" [class.row-revoked]="r.revoked"></tr>
-        </table>
+            </tbody>
+          </table>
+        </div>
       }
-    </mat-card>
+    </div>
   `,
-  styles: [
-    `
-      .page-head { display: flex; justify-content: space-between; align-items: flex-start; margin-bottom: 16px; }
-      h1 { font-size: 22px; color: #e1f5ee; }
-      .sub { color: #888780; font-size: 13px; margin-top: 4px; }
-      .pane { padding: 0; overflow: hidden; }
-      .state { display: flex; gap: 12px; align-items: center; padding: 40px 24px; color: #888780; font-size: 13px; justify-content: center; }
-      .state mat-icon { color: #0F6E56; font-size: 28px; width: 28px; height: 28px; }
-      .state.err mat-icon { color: #E24B4A; }
-      .state code { background: #14151a; padding: 2px 6px; border-radius: 4px; font-family: ui-monospace, monospace; }
-      table { width: 100%; }
-      td.mono, td.num { font-family: ui-monospace, monospace; font-variant-numeric: tabular-nums; }
-      th.num, td.num { text-align: right; }
-      .chip-ok { background: #2a3b34; color: #9fe1cb; }
-      .chip-revoked { background: #501313; color: #F09595; }
-      .row-revoked { opacity: 0.55; }
-    `,
-  ],
 })
 export class DevicesComponent {
   private readonly api = inject(ApiService);
   private readonly destroyRef = inject(DestroyRef);
 
-  protected readonly cols = ['userHint', 'id', 'extensionVersion', 'lastSeenAt', 'eventCount24h', 'status', 'actions'];
   protected readonly rows = signal<DeviceRow[]>([]);
   protected readonly loading = signal<boolean>(true);
   protected readonly error = signal<string | null>(null);

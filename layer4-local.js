@@ -125,13 +125,15 @@ class BrowserNLPClassifier {
 // Il tourne dans un container Docker sur votre serveur interne.
 //
 // Déploiement :
-//   docker run -p 5001:3000 mcr.microsoft.com/presidio-analyzer
-//   docker run -p 5002:3000 mcr.microsoft.com/presidio-anonymizer
+//   docker compose -f infra/docker-compose.yml up -d
+//   // Presidio est accessible via Caddy en HTTPS :
+//   //   https://localhost/presidio/analyzer
+//   //   https://localhost/presidio/anonymizer
 //
 // Le serveur est sur votre réseau — rien ne sort vers le cloud.
 
 class PresidioClassifier {
-  constructor(analyzerUrl = "http://presidio.internal:5001") {
+  constructor(analyzerUrl = "https://localhost/presidio/analyzer") {
     this.analyzerUrl = analyzerUrl;
     this.ready = false;
   }
@@ -243,8 +245,12 @@ class PresidioClassifier {
       });
       const analysisResults = await analysisResponse.json();
 
-      // Puis anonymiser
-      const anonUrl = this.analyzerUrl.replace("5001", "5002");
+      // Puis anonymiser — derive the anonymizer URL from the analyzer URL.
+      // Supports both the Caddy-proxied layout (/presidio/analyzer →
+      // /presidio/anonymizer) and the legacy direct-port layout (5001 → 5002).
+      const anonUrl = this.analyzerUrl
+        .replace("/presidio/analyzer", "/presidio/anonymizer")
+        .replace("5001", "5002");
       const anonResponse = await fetch(`${anonUrl}/anonymize`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },

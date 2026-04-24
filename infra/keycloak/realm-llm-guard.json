@@ -11,7 +11,7 @@
       "publicClient": true,
       "standardFlowEnabled": true,
       "directAccessGrantsEnabled": true,
-      "redirectUris": ["http://localhost:4200/*", "https://dashboard.example.com/*"],
+      "redirectUris": ["http://localhost:4200/*", "https://localhost/*", "https://llm-guard.local/*", "https://dashboard.example.com/*"],
       "webOrigins": ["+"],
       "attributes": {
         "access.token.lifespan": "900",

@@ -98,9 +98,12 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
         const opts = { method: message.method || "GET", headers: { "Content-Type": "application/json" } };
         if (message.body) opts.body = JSON.stringify(message.body);
         const resp = await fetch(message.url, opts);
-        const data = resp.ok ? await resp.json() : null;
-        const errorText = resp.ok ? null : await resp.text().catch(() => null);
-        sendResponse({ ok: resp.ok, status: resp.status, data, error: resp.ok ? null : `HTTP ${resp.status}${errorText ? ": " + errorText.slice(0, 200) : ""}` });
+        const bodyText = await resp.text().catch(() => null);
+        let data = null;
+        if (resp.ok && bodyText) {
+          try { data = JSON.parse(bodyText); } catch { data = bodyText; }
+        }
+        sendResponse({ ok: resp.ok, status: resp.status, data, error: resp.ok ? null : `HTTP ${resp.status}${bodyText ? ": " + bodyText.slice(0, 200) : ""}` });
       } catch (err) {
         console.warn("[LLM Guard] Presidio fetch failed:", message.url, err?.message || err);
         sendResponse({ error: err?.message || String(err) });

@@ -1,0 +1,14 @@
+{
+  "permissions": {
+    "allow": [
+      "Read(//c/Users/gauth/Documents/Dev Projects/LLM-Guard/api-java/src/main/**)",
+      "Read(//c/Users/gauth/Documents/Dev Projects/LLM-Guard/api-java/**)",
+      "Bash(chmod +x *)",
+      "Bash(docker run *)",
+      "Bash(MSYS_NO_PATHCONV=1 docker run --rm -v \"$\\(pwd\\)/Caddyfile:/etc/caddy/Caddyfile:ro\" caddy:2-alpine caddy validate --config /etc/caddy/Caddyfile)",
+      "Bash(MSYS_NO_PATHCONV=1 bash certs/generate-certs.sh)",
+      "Bash(docker search *)",
+      "Bash(MSYS_NO_PATHCONV=1 docker pull alpine/openssl)"
+    ]
+  }
+}

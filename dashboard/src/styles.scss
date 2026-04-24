@@ -1,19 +1,8 @@
-@use '@angular/material' as mat;
-@use '@fontsource/material-icons';
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
 
 html { color-scheme: dark; }
-
-html {
-  @include mat.theme((
-    color: (
-      primary: mat.$green-palette,
-      theme-type: dark,
-    ),
-    typography: 'Inter, system-ui, sans-serif',
-    density: 0,
-  ));
-}
-
 * { box-sizing: border-box; }
 html, body { height: 100%; margin: 0; }
 body {
@@ -23,3 +12,9 @@ body {
 }
 
 a { color: #5DCAA5; }
+
+/* Custom scrollbar for dark theme */
+::-webkit-scrollbar { width: 10px; height: 10px; }
+::-webkit-scrollbar-track { background: #0e0f11; }
+::-webkit-scrollbar-thumb { background: #2a2b30; border-radius: 5px; }
+::-webkit-scrollbar-thumb:hover { background: #3f3e3a; }

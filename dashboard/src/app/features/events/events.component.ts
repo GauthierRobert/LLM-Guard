@@ -1,92 +1,98 @@
 import { Component, inject, signal } from '@angular/core';
 import { DatePipe } from '@angular/common';
-import { MatCardModule } from '@angular/material/card';
-import { MatTableModule } from '@angular/material/table';
-import { MatChipsModule } from '@angular/material/chips';
-import { MatIconModule } from '@angular/material/icon';
-import { MatButtonModule } from '@angular/material/button';
 
 import { ApiService } from '../../core/api.service';
 import { LLMGuardEvent } from '../../core/schema.generated';
 import { LiveService } from '../../core/live.service';
+import { IconComponent } from '../../shared/icon.component';
+
+const ACTION_STYLE: Record<string, string> = {
+  CLEAN: 'bg-clean-900 text-brand-300',
+  ANONYMIZED: 'bg-brand-700 text-ink-50',
+  PII_DETECTED: 'bg-warn-900 text-warn-300',
+  BLOCKED: 'bg-danger-800 text-danger-300',
+};
+
+const SEVERITY_STYLE: Record<string, string> = {
+  critical: 'bg-danger-800 text-danger-300',
+  high: 'bg-high-900 text-high-300',
+  medium: 'bg-warn-900 text-warn-300',
+  low: 'bg-info-900 text-info-500',
+};
 
 @Component({
   selector: 'lg-events',
   standalone: true,
-  imports: [DatePipe, MatCardModule, MatTableModule, MatChipsModule, MatIconModule, MatButtonModule],
+  imports: [DatePipe, IconComponent],
   template: `
-    <header class="page-head">
-      <h1>Évènements</h1>
-      <button mat-stroked-button (click)="toggleLive()">
-        <mat-icon>{{ live.connected() ? 'sync' : 'sync_disabled' }}</mat-icon>
+    <header class="flex justify-between items-center mb-5">
+      <h1 class="text-[22px] font-semibold text-ink-50">Évènements</h1>
+      <button type="button" (click)="toggleLive()"
+              class="inline-flex items-center gap-2 px-3 py-2 rounded-lg border text-[13px] transition-colors"
+              [class]="live.connected()
+                ? 'border-brand-700 bg-brand-700/15 text-brand-500 hover:bg-brand-700/25'
+                : 'border-ink-700 text-ink-100 hover:border-brand-700 hover:bg-brand-700/10'">
+        <lg-icon [name]="live.connected() ? 'sync' : 'sync_disabled'" [size]="16"
+                 [class]="live.connected() ? 'animate-spin-slow' : ''"/>
         {{ live.connected() ? 'Live activé' : 'Activer le live' }}
       </button>
     </header>
 
-    <mat-card class="pane">
+    <div class="bg-ink-800 border border-ink-700 rounded-xl overflow-hidden">
       @if (rows().length > 0) {
-        <table mat-table [dataSource]="rows()">
-          <ng-container matColumnDef="timestamp">
-            <th mat-header-cell *matHeaderCellDef>Heure</th>
-            <td mat-cell *matCellDef="let r">{{ r.timestamp | date: 'short' }}</td>
-          </ng-container>
-          <ng-container matColumnDef="llm">
-            <th mat-header-cell *matHeaderCellDef>LLM</th>
-            <td mat-cell *matCellDef="let r">{{ r.llm }}</td>
-          </ng-container>
-          <ng-container matColumnDef="action">
-            <th mat-header-cell *matHeaderCellDef>Action</th>
-            <td mat-cell *matCellDef="let r"><mat-chip [class]="'chip-' + r.action">{{ r.action }}</mat-chip></td>
-          </ng-container>
-          <ng-container matColumnDef="hostname">
-            <th mat-header-cell *matHeaderCellDef>Hôte</th>
-            <td mat-cell *matCellDef="let r">{{ r.hostname }}</td>
-          </ng-container>
-          <ng-container matColumnDef="findings">
-            <th mat-header-cell *matHeaderCellDef>Détections</th>
-            <td mat-cell *matCellDef="let r">
-              @for (f of r.findings; track f.type) {
-                <mat-chip [class]="'sev-' + f.severity">{{ f.type }} ({{ f.count }})</mat-chip>
+        <div class="overflow-x-auto">
+          <table class="w-full text-[13px]">
+            <thead>
+              <tr class="bg-ink-900/50 border-b border-ink-700">
+                <th class="text-left px-4 py-3 text-[10px] uppercase tracking-wide text-ink-300 font-semibold">Heure</th>
+                <th class="text-left px-4 py-3 text-[10px] uppercase tracking-wide text-ink-300 font-semibold">LLM</th>
+                <th class="text-left px-4 py-3 text-[10px] uppercase tracking-wide text-ink-300 font-semibold">Action</th>
+                <th class="text-left px-4 py-3 text-[10px] uppercase tracking-wide text-ink-300 font-semibold">Hôte</th>
+                <th class="text-left px-4 py-3 text-[10px] uppercase tracking-wide text-ink-300 font-semibold">Détections</th>
+              </tr>
+            </thead>
+            <tbody>
+              @for (r of rows(); track r.timestamp + r.endpoint) {
+                <tr class="border-b border-ink-700 hover:bg-ink-900/40 transition-colors">
+                  <td class="px-4 py-3 text-ink-100 font-mono tabular-nums">{{ r.timestamp | date: 'short' }}</td>
+                  <td class="px-4 py-3 text-ink-50 font-medium">{{ r.llm }}</td>
+                  <td class="px-4 py-3">
+                    <span class="inline-block px-2.5 py-0.5 rounded-full text-[10px] font-semibold uppercase tracking-wide"
+                          [class]="actionStyle(r.action)">{{ r.action }}</span>
+                  </td>
+                  <td class="px-4 py-3 text-ink-300 font-mono text-[12px]">{{ r.hostname }}</td>
+                  <td class="px-4 py-3">
+                    <div class="flex flex-wrap gap-1.5">
+                      @for (f of r.findings; track f.type) {
+                        <span class="inline-block px-2 py-0.5 rounded-full text-[10px] font-medium"
+                              [class]="severityStyle(f.severity)">{{ f.type }} ({{ f.count }})</span>
+                      }
+                    </div>
+                  </td>
+                </tr>
               }
-            </td>
-          </ng-container>
-          <tr mat-header-row *matHeaderRowDef="cols"></tr>
-          <tr mat-row *matRowDef="let r; columns: cols"></tr>
-        </table>
+            </tbody>
+          </table>
+        </div>
       } @else if (loaded()) {
-        <div class="empty-state">
-          <mat-icon>list_alt</mat-icon>
-          <p>Aucun évènement ingéré. Activez la télémétrie dans l'extension ou lancez <code>bash infra/seed-demo.sh</code>.</p>
+        <div class="py-14 px-6 text-center text-ink-300 text-[13px]">
+          <lg-icon name="list_alt" [size]="40" class="text-brand-700 mx-auto mb-3"/>
+          <p>Aucun évènement ingéré. Activez la télémétrie dans l'extension
+            (<code class="bg-ink-900 px-1.5 py-0.5 rounded font-mono text-[11px]">chrome-extension://…/options.html</code>)
+            et pointez-la sur <code class="bg-ink-900 px-1.5 py-0.5 rounded font-mono text-[11px]">https://localhost</code>.</p>
         </div>
       } @else {
-        <p class="empty">Chargement…</p>
+        <p class="py-10 px-6 text-ink-400 text-[13px]">Chargement…</p>
       }
-    </mat-card>
+    </div>
   `,
-  styles: [
-    `
-      .page-head { display: flex; justify-content: space-between; align-items: center; margin-bottom: 16px; }
-      h1 { font-size: 22px; color: #e1f5ee; }
-      .pane { padding: 0; overflow: hidden; }
-      .chip-CLEAN { background: #2a3b34; color: #9fe1cb; }
-      .chip-ANONYMIZED { background: #0F6E56; color: #e1f5ee; }
-      .chip-PII_DETECTED { background: #412402; color: #FAC775; }
-      .chip-BLOCKED { background: #501313; color: #F09595; }
-      .sev-critical { background: #501313; color: #F09595; }
-      .sev-high { background: #4A1B0C; color: #F0997B; }
-      .sev-medium { background: #412402; color: #FAC775; }
-      .sev-low { background: #042C53; color: #85B7EB; }
-      .empty-state { padding: 40px 24px; text-align: center; color: #888780; }
-      .empty-state mat-icon { font-size: 40px; width: 40px; height: 40px; color: #0F6E56; margin-bottom: 8px; }
-      .empty-state code { background: #14151a; padding: 2px 6px; border-radius: 4px; font-family: ui-monospace, monospace; }
-      .empty { padding: 24px; color: #5f5e5a; }
-    `,
-  ],
+  styles: [`
+    .animate-spin-slow { animation: spin 3s linear infinite; }
+  `],
 })
 export class EventsComponent {
   private readonly api = inject(ApiService);
   protected readonly live = inject(LiveService);
-  protected readonly cols = ['timestamp', 'llm', 'action', 'hostname', 'findings'];
   protected readonly rows = signal<LLMGuardEvent[]>([]);
   protected readonly loaded = signal<boolean>(false);
 
@@ -106,5 +112,13 @@ export class EventsComponent {
   protected toggleLive(): void {
     if (this.live.connected()) this.live.disconnect();
     else this.live.connect();
+  }
+
+  protected actionStyle(a: string): string {
+    return ACTION_STYLE[a] ?? 'bg-ink-700 text-ink-100';
+  }
+
+  protected severityStyle(s: string): string {
+    return SEVERITY_STYLE[s] ?? 'bg-ink-700 text-ink-100';
   }
 }

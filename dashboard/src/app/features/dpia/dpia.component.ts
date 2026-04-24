@@ -1,128 +1,106 @@
 import { Component, PLATFORM_ID, computed, inject, signal } from '@angular/core';
 import { isPlatformBrowser } from '@angular/common';
-import { MatCardModule } from '@angular/material/card';
-import { MatIconModule } from '@angular/material/icon';
-import { MatButtonModule } from '@angular/material/button';
 
 import { ComplianceService } from '../../core/compliance.service';
+import { IconComponent } from '../../shared/icon.component';
 
 @Component({
   selector: 'lg-dpia',
   standalone: true,
-  imports: [MatCardModule, MatIconModule, MatButtonModule],
+  imports: [IconComponent],
   template: `
-    <header class="page-head">
+    <header class="flex justify-between items-start mb-5 gap-4 flex-wrap">
       <div>
-        <h1>AIPD & Registre des traitements</h1>
-        <p class="sub">Génération automatique de l'analyse d'impact (Art. 35) et du RoPA (Art. 30) à partir de votre télémétrie.</p>
+        <h1 class="text-[22px] font-semibold text-ink-50">AIPD & Registre des traitements</h1>
+        <p class="text-ink-300 text-[13px] mt-1 max-w-[600px]">
+          Génération automatique de l'analyse d'impact (Art. 35) et du RoPA (Art. 30) à partir de votre télémétrie.
+        </p>
       </div>
-      <div class="actions">
-        <button mat-stroked-button (click)="refresh()"><mat-icon>refresh</mat-icon> Régénérer</button>
-        <button mat-flat-button color="primary" (click)="downloadDpia()"><mat-icon>download</mat-icon> Télécharger AIPD</button>
-        <button mat-stroked-button (click)="downloadRopa()"><mat-icon>table_chart</mat-icon> Exporter RoPA (CSV)</button>
+      <div class="flex gap-2 flex-wrap">
+        <button type="button" (click)="refresh()"
+                class="inline-flex items-center gap-2 px-3 py-2 rounded-lg border border-ink-700 text-ink-100 text-[13px] hover:border-brand-700 hover:bg-brand-700/10 transition-colors">
+          <lg-icon name="refresh" [size]="16"/> Régénérer
+        </button>
+        <button type="button" (click)="downloadDpia()"
+                class="inline-flex items-center gap-2 px-3 py-2 rounded-lg bg-brand-700 hover:bg-brand-900 text-ink-50 text-[13px] font-medium transition-colors">
+          <lg-icon name="download" [size]="16"/> Télécharger AIPD
+        </button>
+        <button type="button" (click)="downloadRopa()"
+                class="inline-flex items-center gap-2 px-3 py-2 rounded-lg border border-ink-700 text-ink-100 text-[13px] hover:border-brand-700 hover:bg-brand-700/10 transition-colors">
+          <lg-icon name="table_chart" [size]="16"/> Exporter RoPA (CSV)
+        </button>
       </div>
     </header>
 
-    <section class="summary">
-      <mat-card>
-        <div class="kpi-label">Score global</div>
-        <div class="kpi-value" [style.color]="scoreColor()">{{ score().score }}/100</div>
-        <div class="kpi-note">Grade {{ score().grade }}</div>
-      </mat-card>
-      <mat-card>
-        <div class="kpi-label">Articles RGPD mobilisés</div>
-        <div class="kpi-value v-teal">{{ gdprCount() }}</div>
-        <div class="kpi-note">sur {{ totalGdpr() }} disponibles</div>
-      </mat-card>
-      <mat-card>
-        <div class="kpi-label">Articles IA Act mobilisés</div>
-        <div class="kpi-value v-purple">{{ aiActCount() }}</div>
-        <div class="kpi-note">sur {{ totalAiAct() }} disponibles</div>
-      </mat-card>
-      <mat-card>
-        <div class="kpi-label">Dernière régénération</div>
-        <div class="kpi-value-sm">{{ generatedAt() }}</div>
-        <div class="kpi-note">Document vivant</div>
-      </mat-card>
+    <section class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-3 mb-4">
+      <div class="bg-ink-800 border border-ink-700 rounded-xl p-3.5">
+        <div class="text-[10px] uppercase tracking-wide text-ink-300 font-semibold">Score global</div>
+        <div class="text-[28px] font-bold tabular-nums mt-1" [style.color]="scoreColor()">{{ score().score }}/100</div>
+        <div class="text-[11px] text-ink-500 mt-0.5">Grade {{ score().grade }}</div>
+      </div>
+      <div class="bg-ink-800 border border-ink-700 rounded-xl p-3.5">
+        <div class="text-[10px] uppercase tracking-wide text-ink-300 font-semibold">Articles RGPD mobilisés</div>
+        <div class="text-[28px] font-bold text-brand-500 tabular-nums mt-1">{{ gdprCount() }}</div>
+        <div class="text-[11px] text-ink-500 mt-0.5">sur {{ totalGdpr() }} disponibles</div>
+      </div>
+      <div class="bg-ink-800 border border-ink-700 rounded-xl p-3.5">
+        <div class="text-[10px] uppercase tracking-wide text-ink-300 font-semibold">Articles IA Act mobilisés</div>
+        <div class="text-[28px] font-bold text-ai-500 tabular-nums mt-1">{{ aiActCount() }}</div>
+        <div class="text-[11px] text-ink-500 mt-0.5">sur {{ totalAiAct() }} disponibles</div>
+      </div>
+      <div class="bg-ink-800 border border-ink-700 rounded-xl p-3.5">
+        <div class="text-[10px] uppercase tracking-wide text-ink-300 font-semibold">Dernière régénération</div>
+        <div class="text-[15px] font-semibold text-ink-50 tabular-nums mt-1.5">{{ generatedAt() }}</div>
+        <div class="text-[11px] text-ink-500 mt-0.5">Document vivant</div>
+      </div>
     </section>
 
-    <section class="grid">
-      <mat-card class="doc">
-        <div class="doc-head">
-          <mat-icon>description</mat-icon>
-          <h2>AIPD — Analyse d'impact relative à la protection des données</h2>
+    <section class="grid grid-cols-1 xl:grid-cols-2 gap-3">
+      <div class="bg-ink-800 border border-ink-700 rounded-xl p-5">
+        <div class="flex items-center gap-2.5 mb-3">
+          <lg-icon name="description" [size]="18" class="text-brand-500"/>
+          <h2 class="text-[14px] font-semibold text-ink-50">AIPD — Analyse d'impact relative à la protection des données</h2>
         </div>
-        <pre class="doc-body">{{ dpiaMarkdown() }}</pre>
-      </mat-card>
+        <pre class="bg-ink-900 border border-ink-700 p-4 rounded-lg max-h-[560px] overflow-y-auto font-mono text-[12px] leading-relaxed text-ink-100 whitespace-pre-wrap m-0">{{ dpiaMarkdown() }}</pre>
+      </div>
 
-      <mat-card class="doc">
-        <div class="doc-head">
-          <mat-icon>view_list</mat-icon>
-          <h2>RoPA — Aperçu</h2>
+      <div class="bg-ink-800 border border-ink-700 rounded-xl p-5">
+        <div class="flex items-center gap-2.5 mb-3">
+          <lg-icon name="view_list" [size]="18" class="text-brand-500"/>
+          <h2 class="text-[14px] font-semibold text-ink-50">RoPA — Aperçu</h2>
         </div>
-        <div class="ropa-wrap">
-          <table class="ropa">
-            <thead>
-              <tr>
-                <th>Finalité</th>
-                <th>Catégorie</th>
-                <th>Destinataire</th>
-                <th>Transfert</th>
-                <th>Articles</th>
+        <div class="max-h-[560px] overflow-y-auto">
+          <table class="w-full text-[12px]">
+            <thead class="sticky top-0 bg-ink-800">
+              <tr class="border-b border-ink-700">
+                <th class="text-left px-2.5 py-2 text-[10px] uppercase tracking-wide text-ink-300 font-semibold">Finalité</th>
+                <th class="text-left px-2.5 py-2 text-[10px] uppercase tracking-wide text-ink-300 font-semibold">Catégorie</th>
+                <th class="text-left px-2.5 py-2 text-[10px] uppercase tracking-wide text-ink-300 font-semibold">Destinataire</th>
+                <th class="text-left px-2.5 py-2 text-[10px] uppercase tracking-wide text-ink-300 font-semibold">Transfert</th>
+                <th class="text-left px-2.5 py-2 text-[10px] uppercase tracking-wide text-ink-300 font-semibold">Articles</th>
               </tr>
             </thead>
             <tbody>
               @for (row of ropaPreview(); track row.key) {
-                <tr>
-                  <td>{{ row.purpose }}</td>
-                  <td>{{ row.category }}</td>
-                  <td>{{ row.recipient }}</td>
-                  <td>
-                    <span class="chip" [class.warn]="row.transferFlag">{{ row.transfer }}</span>
+                <tr class="border-b border-ink-700">
+                  <td class="px-2.5 py-2 text-ink-100 align-top">{{ row.purpose }}</td>
+                  <td class="px-2.5 py-2 text-ink-100 align-top">{{ row.category }}</td>
+                  <td class="px-2.5 py-2 text-ink-100 align-top">{{ row.recipient }}</td>
+                  <td class="px-2.5 py-2 align-top">
+                    <span class="inline-block px-2 py-0.5 rounded-full text-[10px] whitespace-nowrap"
+                          [class]="row.transferFlag ? 'bg-warn-900 text-warn-300' : 'bg-clean-900 text-brand-300'">
+                      {{ row.transfer }}
+                    </span>
                   </td>
-                  <td class="arts">{{ row.articles }}</td>
+                  <td class="px-2.5 py-2 font-mono text-[10px] text-brand-300 align-top">{{ row.articles }}</td>
                 </tr>
               }
             </tbody>
           </table>
         </div>
-      </mat-card>
+      </div>
     </section>
   `,
-  styles: [
-    `
-      .page-head { display: flex; justify-content: space-between; align-items: flex-start; margin-bottom: 18px; gap: 16px; flex-wrap: wrap; }
-      h1 { font-size: 22px; font-weight: 600; color: #e1f5ee; }
-      .sub { color: #888780; font-size: 13px; margin-top: 4px; max-width: 600px; }
-      .actions { display: flex; gap: 8px; flex-wrap: wrap; }
-
-      .summary { display: grid; grid-template-columns: repeat(4, 1fr); gap: 12px; margin-bottom: 14px; }
-      .summary mat-card { padding: 14px; }
-      .kpi-label { font-size: 11px; text-transform: uppercase; color: #888780; letter-spacing: 0.6px; }
-      .kpi-value { font-size: 28px; font-weight: 700; margin-top: 4px; font-variant-numeric: tabular-nums; }
-      .kpi-value-sm { font-size: 15px; font-weight: 600; color: #e1f5ee; margin-top: 6px; font-variant-numeric: tabular-nums; }
-      .kpi-note { font-size: 11px; color: #5f5e5a; margin-top: 4px; }
-      .v-teal { color: #5DCAA5; }
-      .v-purple { color: #c4a6ff; }
-
-      .grid { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; }
-      @media (max-width: 1200px) { .grid { grid-template-columns: 1fr; } }
-
-      .doc { padding: 18px; }
-      .doc-head { display: flex; gap: 10px; align-items: center; margin-bottom: 14px; }
-      .doc-head mat-icon { color: #5DCAA5; }
-      .doc h2 { font-size: 14px; font-weight: 600; color: #e1f5ee; }
-      .doc-body { background: #14151a; border: 1px solid #1e1f23; padding: 16px; border-radius: 8px; max-height: 560px; overflow-y: auto; font-family: ui-monospace, monospace; font-size: 12px; line-height: 1.6; color: #d1d0c7; white-space: pre-wrap; margin: 0; }
-
-      .ropa-wrap { max-height: 560px; overflow-y: auto; }
-      .ropa { width: 100%; border-collapse: collapse; font-size: 12px; }
-      .ropa th { text-align: left; padding: 8px 10px; color: #888780; text-transform: uppercase; font-size: 10px; letter-spacing: 0.6px; border-bottom: 1px solid #1e1f23; background: #14151a; position: sticky; top: 0; }
-      .ropa td { padding: 8px 10px; border-bottom: 1px solid #1e1f23; color: #d1d0c7; vertical-align: top; }
-      .ropa .arts { font-family: ui-monospace, monospace; font-size: 10px; color: #9fe1cb; }
-      .chip { padding: 2px 8px; border-radius: 10px; font-size: 10px; background: #2a3b34; color: #9fe1cb; white-space: nowrap; }
-      .chip.warn { background: #412402; color: #FAC775; }
-    `,
-  ],
 })
 export class DpiaComponent {
   private readonly svc = inject(ComplianceService);

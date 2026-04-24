@@ -401,22 +401,56 @@
   function createPresidioProxy(analyzerUrl) {
     let _ready = false;
     const base = analyzerUrl.replace(/\/+$/, "");
+    // Chosen at init() based on /supportedentities per language. Prefer French,
+    // fall back to English (always available in a default Presidio deployment).
+    // If even English has no recognizers (broken backend), we disable calls to
+    // avoid flooding the console with HTTP 500s.
+    let _lang = null;
+    let _supported = null;
+    const analyzeBody = (text) => {
+      const body = { text, language: _lang, score_threshold: 0.6 };
+      if (Array.isArray(_supported) && _supported.length > 0) body.entities = _supported;
+      return body;
+    };
+    async function detectLanguage() {
+      for (const lang of ["fr", "en"]) {
+        try {
+          const se = await presidioFetch(`${base}/supportedentities?language=${encodeURIComponent(lang)}`);
+          if (se.ok && Array.isArray(se.data) && se.data.length > 0) {
+            const set = new Set(se.data);
+            return { lang, supported: PRESIDIO_ENTITIES.filter(e => set.has(e)) };
+          }
+        } catch { /* try next */ }
+      }
+      return null;
+    }
     return {
       get ready() { return _ready; },
       async init() {
         try {
           const resp = await presidioFetch(`${base}/health`);
-          _ready = !!resp.ok;
-          if (_ready) {
-            console.log("[LLM Guard] Presidio connecté (proxy background)");
-          } else if (resp.error === "HOST_PERMISSION_MISSING") {
-            console.warn(
-              "[LLM Guard] Presidio: permission d'accès non accordée pour " + base +
-              ". Ouvrez la page Options et cliquez « Tester » pour autoriser."
-            );
-          } else {
-            console.warn("[LLM Guard] Presidio non accessible:", resp.error || "inconnu");
+          if (!resp.ok) {
+            _ready = false;
+            if (resp.error === "HOST_PERMISSION_MISSING") {
+              console.warn(
+                "[LLM Guard] Presidio: permission d'accès non accordée pour " + base +
+                ". Ouvrez la page Options et cliquez « Tester » pour autoriser."
+              );
+            } else {
+              console.warn("[LLM Guard] Presidio non accessible:", resp.error || "inconnu");
+            }
+            return;
           }
+          const detected = await detectLanguage();
+          if (!detected) {
+            _ready = false;
+            console.warn("[LLM Guard] Presidio: aucune langue (fr/en) configurée sur le backend — Layer 4 désactivé.");
+            return;
+          }
+          _lang = detected.lang;
+          _supported = detected.supported;
+          _ready = true;
+          console.log(`[LLM Guard] Presidio connecté (proxy background, langue=${_lang}, ${_supported.length} entités)`);
         } catch (err) {
           _ready = false;
           console.warn("[LLM Guard] Presidio non accessible:", err?.message || err);
@@ -425,8 +459,7 @@
       async classify(text) {
         if (!_ready) return [];
         try {
-          const resp = await presidioFetch(`${base}/analyze`,
-            { text, language: "fr", entities: PRESIDIO_ENTITIES, score_threshold: 0.6 }, "POST");
+          const resp = await presidioFetch(`${base}/analyze`, analyzeBody(text), "POST");
           if (!resp.ok || !Array.isArray(resp.data)) {
             if (resp.error) console.warn("[LLM Guard] Presidio /analyze failed:", resp.error);
             return [];
@@ -444,8 +477,7 @@
       async analyzeSpans(text) {
         if (!_ready) return [];
         try {
-          const resp = await presidioFetch(`${base}/analyze`,
-            { text, language: "fr", entities: PRESIDIO_ENTITIES, score_threshold: 0.6 }, "POST");
+          const resp = await presidioFetch(`${base}/analyze`, analyzeBody(text), "POST");
           if (!resp.ok && resp.error) console.warn("[LLM Guard] Presidio /analyze failed:", resp.error);
           return (resp.ok && Array.isArray(resp.data)) ? resp.data : [];
         } catch (err) {

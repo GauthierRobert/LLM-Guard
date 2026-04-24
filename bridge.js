@@ -19,6 +19,14 @@ const VALID_MODES = new Set(["block", "visible", "anonymize"]);
 const SHA256_HEX = /^[a-f0-9]{64}$/i;
 const MAX_FILENAME_LEN = 256;
 
+// After an extension reload/update, `chrome.runtime.id` becomes undefined in
+// orphaned content scripts. Any call to chrome.* then throws
+// "Extension context invalidated". Guard every bridge hop so a stale page
+// fails quietly instead of spamming the console until the user refreshes.
+function extensionAlive() {
+  try { return !!(chrome.runtime && chrome.runtime.id); } catch { return false; }
+}
+
 function originMatches(evt) {
   // window.location.origin covers http/https/file etc. Same-origin-only.
   try {
@@ -44,31 +52,37 @@ window.addEventListener("message", (event) => {
     // Log payload is opaque metadata — background.js revalidates before
     // storing. We limit nothing here because the payload is bounded by the
     // scrubber downstream.
-    chrome.runtime.sendMessage({
-      source: "llm-guard",
-      type: "log",
-      payload: event.data.payload,
-    });
+    if (!extensionAlive()) return;
+    try {
+      chrome.runtime.sendMessage({
+        source: "llm-guard",
+        type: "log",
+        payload: event.data.payload,
+      });
+    } catch { /* orphaned content script — page needs a refresh */ }
     return;
   }
 
   if (event.data.type === "getMode") {
-    chrome.storage.local.get(["guard_mode", "guard_layer4", "guard_attachment"], (r) => {
-      const mode = VALID_MODES.has(r.guard_mode) ? r.guard_mode : "anonymize";
-      const layer4 = r.guard_layer4 || { enabled: false, presidioUrl: "" };
-      const attachment = r.guard_attachment || {};
-      window.postMessage({ source: "llm-guard-bridge", type: "modeUpdate", mode }, window.location.origin);
-      window.postMessage({ source: "llm-guard-bridge", type: "layer4Update", layer4 }, window.location.origin);
-      window.postMessage({ source: "llm-guard-bridge", type: "attachmentConfigUpdate", attachment }, window.location.origin);
-    });
+    if (!extensionAlive()) return;
+    try {
+      chrome.storage.local.get(["guard_mode", "guard_layer4", "guard_attachment"], (r) => {
+        const mode = VALID_MODES.has(r.guard_mode) ? r.guard_mode : "anonymize";
+        const layer4 = r.guard_layer4 || { enabled: false, presidioUrl: "" };
+        const attachment = r.guard_attachment || {};
+        window.postMessage({ source: "llm-guard-bridge", type: "modeUpdate", mode }, window.location.origin);
+        window.postMessage({ source: "llm-guard-bridge", type: "layer4Update", layer4 }, window.location.origin);
+        window.postMessage({ source: "llm-guard-bridge", type: "attachmentConfigUpdate", attachment }, window.location.origin);
+      });
+    } catch { /* orphaned */ }
     return;
   }
 
   if (event.data.type === "setMode") {
     const mode = event.data.mode;
-    if (VALID_MODES.has(mode)) {
-      chrome.storage.local.set({ guard_mode: mode });
-    }
+    if (!VALID_MODES.has(mode)) return;
+    if (!extensionAlive()) return;
+    try { chrome.storage.local.set({ guard_mode: mode }); } catch { /* orphaned */ }
     return;
   }
 
@@ -78,16 +92,35 @@ window.addEventListener("message", (event) => {
     const { reqId, url, body, method } = event.data;
     if (typeof reqId !== "string" || typeof url !== "string") return;
     if (!/^https?:\/\//i.test(url)) return;
-    chrome.runtime.sendMessage(
-      { source: "llm-guard", type: "presidio.fetch", reqId, url, body: body || null, method: method || "GET" },
-      (result) => {
-        const r = result || { error: "no response from background" };
-        window.postMessage(
-          { source: "llm-guard-bridge", type: "presidio.response", reqId, ok: !!r.ok, data: r.data || null, error: r.error || null },
-          window.location.origin
-        );
-      }
-    );
+
+    // Always post a response for this reqId so the content-script promise
+    // resolves immediately instead of waiting for its 5s timeout.
+    const respond = (payload) => {
+      window.postMessage(
+        { source: "llm-guard-bridge", type: "presidio.response", reqId, ...payload },
+        window.location.origin
+      );
+    };
+
+    if (!extensionAlive()) {
+      respond({ ok: false, data: null, error: "extension reloaded — refresh the page" });
+      return;
+    }
+    try {
+      chrome.runtime.sendMessage(
+        { source: "llm-guard", type: "presidio.fetch", reqId, url, body: body || null, method: method || "GET" },
+        (result) => {
+          if (chrome.runtime.lastError) {
+            respond({ ok: false, data: null, error: chrome.runtime.lastError.message });
+            return;
+          }
+          const r = result || { error: "no response from background" };
+          respond({ ok: !!r.ok, data: r.data || null, error: r.error || null });
+        }
+      );
+    } catch (err) {
+      respond({ ok: false, data: null, error: err?.message || String(err) });
+    }
     return;
   }
 
@@ -101,13 +134,16 @@ window.addEventListener("message", (event) => {
     const sha256 = sha256Raw.toLowerCase();
     const filenameRaw = typeof event.data.filename === "string" ? event.data.filename : "";
     const filename = filenameRaw.slice(0, MAX_FILENAME_LEN);
-    chrome.storage.local.get(["guard_user_allowlist"], (r) => {
-      const list = Array.isArray(r.guard_user_allowlist) ? r.guard_user_allowlist : [];
-      if (!list.some((e) => e.type === "attachment" && e.pattern === sha256)) {
-        list.push({ type: "attachment", pattern: sha256, filename });
-        chrome.storage.local.set({ guard_user_allowlist: list });
-      }
-    });
+    if (!extensionAlive()) return;
+    try {
+      chrome.storage.local.get(["guard_user_allowlist"], (r) => {
+        const list = Array.isArray(r.guard_user_allowlist) ? r.guard_user_allowlist : [];
+        if (!list.some((e) => e.type === "attachment" && e.pattern === sha256)) {
+          list.push({ type: "attachment", pattern: sha256, filename });
+          chrome.storage.local.set({ guard_user_allowlist: list });
+        }
+      });
+    } catch { /* orphaned */ }
     return;
   }
 });
