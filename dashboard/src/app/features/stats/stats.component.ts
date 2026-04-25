@@ -1,17 +1,17 @@
 import {
-  AfterViewInit,
   Component,
   DestroyRef,
   ElementRef,
   PLATFORM_ID,
-  ViewChild,
   computed,
   effect,
   inject,
   signal,
+  viewChild,
 } from '@angular/core';
 import { takeUntilDestroyed } from '@angular/core/rxjs-interop';
 import { isPlatformBrowser } from '@angular/common';
+import { RouterLink } from '@angular/router';
 
 import {
   ArcElement,
@@ -29,6 +29,7 @@ import {
 
 import { ApiService, TimeRange } from '../../core/api.service';
 import { ComplianceService } from '../../core/compliance.service';
+import { ComplianceArticle, FINDING_TYPE_TO_ARTICLES } from '../../core/compliance.data';
 import { StatsResponse } from '../../core/schema.generated';
 import { IconComponent } from '../../shared/icon.component';
 
@@ -72,13 +73,39 @@ interface LlmSlice {
   color: string;
 }
 
+type Severity = 'critical' | 'high' | 'medium' | 'low';
+
+interface FindingRow {
+  type: string;
+  count: number;
+  articles: ComplianceArticle[];
+  severity: Severity;
+}
+
+const SEV_CLASS: Record<Severity, string> = {
+  critical: 'bg-danger-800 text-danger-300',
+  high:     'bg-high-900 text-high-300',
+  medium:   'bg-warn-900 text-warn-300',
+  low:      'bg-info-900 text-info-500',
+};
+
+const SEV_LABEL: Record<Severity, string> = {
+  critical: 'Critique',
+  high:     'Élevée',
+  medium:   'Moyenne',
+  low:      'Faible',
+};
+
 @Component({
   selector: 'lg-stats',
   standalone: true,
-  imports: [IconComponent],
+  imports: [IconComponent, RouterLink],
   template: `
     <header class="flex justify-between items-center mb-5">
-      <h1 class="text-[22px] font-semibold text-ink-50">Statistiques d'usage</h1>
+      <div>
+        <h1 class="text-[22px] font-semibold text-ink-50">Statistiques &amp; Détections</h1>
+        <p class="text-ink-300 text-[13px] mt-1">Volumétrie, répartition par LLM et types de PII détectés avec fondement juridique.</p>
+      </div>
       <div class="inline-flex gap-1 bg-ink-800 border border-ink-700 p-[3px] rounded-lg">
         @for (r of ranges; track r) {
           <button type="button" (click)="setRange(r)"
@@ -178,7 +205,7 @@ interface LlmSlice {
         </div>
       </section>
 
-      <div class="bg-ink-800 border border-ink-700 rounded-xl p-5">
+      <div class="bg-ink-800 border border-ink-700 rounded-xl p-5 mb-5">
         <h2 class="text-[13px] uppercase tracking-wide text-ink-300 font-semibold mb-3.5">Top 10 types de PII détectés</h2>
         @if (typeEntries().length > 0) {
           <div class="relative h-80 [&>canvas]:!w-full [&>canvas]:!h-full">
@@ -187,6 +214,74 @@ interface LlmSlice {
         } @else {
           <p class="text-ink-500 text-[12px]">Aucune détection de PII pour cette période.</p>
         }
+      </div>
+
+      <section class="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-3 mb-4">
+        <div class="bg-ink-800 border border-ink-700 rounded-xl p-4">
+          <div class="text-[10px] uppercase tracking-wide text-ink-300 font-semibold">Types détectés</div>
+          <div class="text-[28px] font-bold text-ink-50 tabular-nums mt-1">{{ findingRows().length }}</div>
+        </div>
+        <div class="bg-ink-800 border border-ink-700 rounded-xl p-4">
+          <div class="text-[10px] uppercase tracking-wide text-ink-300 font-semibold">Données Art. 9 RGPD</div>
+          <div class="text-[28px] font-bold text-danger-300 tabular-nums mt-1">{{ art9Count() }}</div>
+          <div class="text-[10px] text-ink-500 mt-0.5">Catégories particulières</div>
+        </div>
+        <div class="bg-ink-800 border border-ink-700 rounded-xl p-4">
+          <div class="text-[10px] uppercase tracking-wide text-ink-300 font-semibold">Signaux IA Act</div>
+          <div class="text-[28px] font-bold text-ai-500 tabular-nums mt-1">{{ aiActCount() }}</div>
+          <div class="text-[10px] text-ink-500 mt-0.5">Annexe III / Art. 5</div>
+        </div>
+        <div class="bg-ink-800 border border-ink-700 rounded-xl p-4">
+          <div class="text-[10px] uppercase tracking-wide text-ink-300 font-semibold">Occurrences totales</div>
+          <div class="text-[28px] font-bold text-brand-500 tabular-nums mt-1">{{ totalOcc() }}</div>
+        </div>
+      </section>
+
+      <div class="bg-ink-800 border border-ink-700 rounded-xl overflow-hidden">
+        <div class="px-5 py-3 border-b border-ink-700 flex items-center gap-2">
+          <lg-icon name="shield" [size]="16" class="text-brand-500"/>
+          <h2 class="text-[13px] uppercase tracking-wide text-ink-300 font-semibold">Détections par type &amp; fondement juridique</h2>
+        </div>
+        <div class="overflow-x-auto">
+          <table class="w-full text-[13px]">
+            <thead>
+              <tr class="bg-ink-900/50 border-b border-ink-700">
+                <th class="text-left px-4 py-3 text-[10px] uppercase tracking-wide text-ink-300 font-semibold">Type</th>
+                <th class="text-right px-4 py-3 text-[10px] uppercase tracking-wide text-ink-300 font-semibold w-32">Occurrences</th>
+                <th class="text-left px-4 py-3 text-[10px] uppercase tracking-wide text-ink-300 font-semibold">Sévérité</th>
+                <th class="text-left px-4 py-3 text-[10px] uppercase tracking-wide text-ink-300 font-semibold">Fondement juridique</th>
+              </tr>
+            </thead>
+            <tbody>
+              @for (row of findingRows(); track row.type) {
+                <tr class="border-b border-ink-700 hover:bg-ink-900/40 transition-colors">
+                  <td class="px-4 py-3 font-mono font-semibold text-ink-50">{{ row.type }}</td>
+                  <td class="px-4 py-3 text-right tabular-nums text-ink-100">{{ row.count }}</td>
+                  <td class="px-4 py-3">
+                    <span class="inline-block px-2.5 py-0.5 rounded-full text-[10px] font-semibold uppercase tracking-wide"
+                          [class]="sevClass(row.severity)">{{ sevLabel(row.severity) }}</span>
+                  </td>
+                  <td class="px-4 py-3">
+                    <div class="flex flex-wrap gap-1.5">
+                      @for (a of row.articles; track a.id) {
+                        <a [routerLink]="'/compliance'" [attr.title]="a.summary"
+                           class="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full text-[11px] border border-transparent transition-colors"
+                           [class]="a.framework === 'AI_ACT'
+                             ? 'bg-ai-900 text-ai-500 hover:border-ai-500'
+                             : 'bg-info-900 text-info-500 hover:border-info-500'">
+                          <lg-icon [name]="a.framework === 'GDPR' ? 'gavel' : 'smart_toy'" [size]="12"/>
+                          <span>{{ a.framework === 'GDPR' ? 'RGPD' : 'IA Act' }} · {{ a.number }}</span>
+                        </a>
+                      }
+                    </div>
+                  </td>
+                </tr>
+              } @empty {
+                <tr><td colspan="4" class="py-10 text-center text-ink-500 text-[13px]">Aucune détection sur la période.</td></tr>
+              }
+            </tbody>
+          </table>
+        </div>
       </div>
     } @else if (loaded() && !hasData()) {
       <div class="bg-ink-800 border border-dashed border-ink-700 rounded-xl p-8 text-center">
@@ -212,7 +307,7 @@ interface LlmSlice {
     }
   `,
 })
-export class StatsComponent implements AfterViewInit {
+export class StatsComponent {
   private readonly api = inject(ApiService);
   private readonly compliance = inject(ComplianceService);
   private readonly isBrowser = isPlatformBrowser(inject(PLATFORM_ID));
@@ -225,14 +320,13 @@ export class StatsComponent implements AfterViewInit {
   protected readonly hasData = this.compliance.hasData;
   protected readonly actionColors = ACTION_COLORS;
 
-  @ViewChild('pieCanvas') private pieCanvas?: ElementRef<HTMLCanvasElement>;
-  @ViewChild('actionsCanvas') private actionsCanvas?: ElementRef<HTMLCanvasElement>;
-  @ViewChild('typesCanvas') private typesCanvas?: ElementRef<HTMLCanvasElement>;
+  private readonly pieCanvas = viewChild<ElementRef<HTMLCanvasElement>>('pieCanvas');
+  private readonly actionsCanvas = viewChild<ElementRef<HTMLCanvasElement>>('actionsCanvas');
+  private readonly typesCanvas = viewChild<ElementRef<HTMLCanvasElement>>('typesCanvas');
 
   private pieChart: Chart | null = null;
   private actionsChart: Chart | null = null;
   private typesChart: Chart | null = null;
-  private viewReady = false;
 
   protected readonly llmSlices = computed<LlmSlice[]>(() => {
     const s = this.stats();
@@ -267,17 +361,45 @@ export class StatsComponent implements AfterViewInit {
     return s && s.total > 0 ? Math.round((s.blocked / s.total) * 100) : 0;
   });
 
+  protected readonly findingRows = computed<FindingRow[]>(() => {
+    const s = this.stats();
+    if (!s) return [];
+    return Object.entries(s.by_type)
+      .map(([type, count]) => ({
+        type,
+        count,
+        articles: this.compliance.articlesForFinding(type),
+        severity: this.severityFor(type),
+      }))
+      .sort((a, b) => b.count - a.count);
+  });
+
+  protected readonly totalOcc = computed(() => this.findingRows().reduce((n, r) => n + r.count, 0));
+
+  protected readonly art9Count = computed(() =>
+    this.findingRows().filter((r) => r.articles.some((a) => a.id === 'gdpr-9')).reduce((n, r) => n + r.count, 0),
+  );
+
+  protected readonly aiActCount = computed(() =>
+    this.findingRows().filter((r) => r.articles.some((a) => a.framework === 'AI_ACT')).reduce((n, r) => n + r.count, 0),
+  );
+
   constructor() {
+    // Single effect that reacts to BOTH data signals AND canvas availability.
+    // viewChild() returns a signal, so the effect re-fires when the canvas
+    // element is attached (e.g. after the @if block becomes truthy), removing
+    // the AfterViewInit/viewReady coordination that broke under zoneless CD.
     effect(() => {
+      if (!this.isBrowser) return;
       const slices = this.llmSlices();
       const types = this.typeEntries();
       const s = this.stats();
-      if (!this.isBrowser || !this.viewReady) return;
-      queueMicrotask(() => {
-        this.renderPie(slices);
-        this.renderActions(s);
-        this.renderTypes(types);
-      });
+      const pie = this.pieCanvas()?.nativeElement;
+      const actions = this.actionsCanvas()?.nativeElement;
+      const typesC = this.typesCanvas()?.nativeElement;
+      this.renderPie(slices, pie);
+      this.renderActions(s, actions);
+      this.renderTypes(types, typesC);
     });
 
     this.destroyRef.onDestroy(() => {
@@ -289,13 +411,6 @@ export class StatsComponent implements AfterViewInit {
     this.refresh();
   }
 
-  ngAfterViewInit(): void {
-    this.viewReady = true;
-    this.renderPie(this.llmSlices());
-    this.renderActions(this.stats());
-    this.renderTypes(this.typeEntries());
-  }
-
   protected setRange(r: TimeRange): void {
     this.range.set(r);
     this.refresh();
@@ -303,6 +418,18 @@ export class StatsComponent implements AfterViewInit {
 
   protected pct(part: number, total: number): number {
     return total > 0 ? Math.round((part / total) * 1000) / 10 : 0;
+  }
+
+  protected sevClass(s: Severity): string { return SEV_CLASS[s]; }
+  protected sevLabel(s: Severity): string { return SEV_LABEL[s]; }
+
+  private severityFor(type: string): Severity {
+    const ids = FINDING_TYPE_TO_ARTICLES[type.toLowerCase()] ?? [];
+    if (ids.includes('aia-5')) return 'critical';
+    if (ids.includes('gdpr-9')) return 'critical';
+    if (['credit_card', 'ssn', 'password', 'nir', 'iban'].includes(type)) return 'high';
+    if (['email', 'phone', 'phone_fr', 'address', 'name'].includes(type)) return 'medium';
+    return 'low';
   }
 
   private refresh(): void {
@@ -315,8 +442,7 @@ export class StatsComponent implements AfterViewInit {
       });
   }
 
-  private renderPie(slices: LlmSlice[]): void {
-    const canvas = this.pieCanvas?.nativeElement;
+  private renderPie(slices: LlmSlice[], canvas: HTMLCanvasElement | undefined): void {
     if (!canvas || slices.length === 0) {
       this.pieChart?.destroy();
       this.pieChart = null;
@@ -355,17 +481,17 @@ export class StatsComponent implements AfterViewInit {
         },
       },
     };
-    if (this.pieChart) {
+    if (this.pieChart && this.pieChart.canvas === canvas) {
       this.pieChart.data = config.data;
       this.pieChart.options = config.options ?? {};
       this.pieChart.update();
     } else {
+      this.pieChart?.destroy();
       this.pieChart = new Chart(canvas, config);
     }
   }
 
-  private renderActions(s: StatsResponse | null): void {
-    const canvas = this.actionsCanvas?.nativeElement;
+  private renderActions(s: StatsResponse | null, canvas: HTMLCanvasElement | undefined): void {
     if (!canvas || !s || s.total === 0) {
       this.actionsChart?.destroy();
       this.actionsChart = null;
@@ -409,17 +535,17 @@ export class StatsComponent implements AfterViewInit {
         },
       },
     };
-    if (this.actionsChart) {
+    if (this.actionsChart && this.actionsChart.canvas === canvas) {
       this.actionsChart.data = config.data;
       this.actionsChart.options = config.options ?? {};
       this.actionsChart.update();
     } else {
+      this.actionsChart?.destroy();
       this.actionsChart = new Chart(canvas, config);
     }
   }
 
-  private renderTypes(entries: [string, number][]): void {
-    const canvas = this.typesCanvas?.nativeElement;
+  private renderTypes(entries: [string, number][], canvas: HTMLCanvasElement | undefined): void {
     if (!canvas || entries.length === 0) {
       this.typesChart?.destroy();
       this.typesChart = null;
@@ -463,11 +589,12 @@ export class StatsComponent implements AfterViewInit {
         },
       },
     };
-    if (this.typesChart) {
+    if (this.typesChart && this.typesChart.canvas === canvas) {
       this.typesChart.data = config.data;
       this.typesChart.options = config.options ?? {};
       this.typesChart.update();
     } else {
+      this.typesChart?.destroy();
       this.typesChart = new Chart(canvas, config);
     }
   }

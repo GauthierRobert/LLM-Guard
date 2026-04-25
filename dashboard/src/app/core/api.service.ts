@@ -22,8 +22,12 @@ export class ApiService {
   private readonly base = '/api';
 
   stats(range: TimeRange = '24h'): Observable<StatsResponse> {
+    type RawStats = Partial<StatsResponse> & {
+      byLlm?: Record<string, number>;
+      byType?: Record<string, number>;
+    };
     return this.http
-      .get<Partial<StatsResponse>>(`${this.base}/v1/stats`, { params: { range } })
+      .get<RawStats>(`${this.base}/v1/stats`, { params: { range } })
       .pipe(
         map((s) => ({
           total: s.total ?? 0,
@@ -31,8 +35,8 @@ export class ApiService {
           flagged: s.flagged ?? 0,
           blocked: s.blocked ?? 0,
           anonymized: s.anonymized ?? 0,
-          by_llm: s.by_llm ?? {},
-          by_type: s.by_type ?? {},
+          by_llm: s.by_llm ?? s.byLlm ?? {},
+          by_type: s.by_type ?? s.byType ?? {},
         })),
       );
   }

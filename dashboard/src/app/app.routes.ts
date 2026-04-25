@@ -14,10 +14,7 @@ export const routes: Routes = [
     path: 'stats',
     loadComponent: () => import('./features/stats/stats.component').then((m) => m.StatsComponent),
   },
-  {
-    path: 'findings',
-    loadComponent: () => import('./features/findings/findings.component').then((m) => m.FindingsComponent),
-  },
+  { path: 'findings', redirectTo: 'stats', pathMatch: 'full' },
   {
     path: 'compliance',
     loadComponent: () => import('./features/compliance/compliance.component').then((m) => m.ComplianceComponent),
