@@ -159,7 +159,7 @@
     if (evt.data.type === "modeUpdate") {
       try {
         const m = evt.data.mode;
-        if (m === "anonymize" || m === "block" || m === "visible") CONFIG.mode = m;
+        if (m === "anonymize" || m === "block" || m === "visible" || m === "review") CONFIG.mode = m;
         else console.warn("[LLM Guard] modeUpdate: unknown mode received", m);
         const badge = document.getElementById("llm-guard-badge");
         if (badge) {
@@ -939,6 +939,65 @@
         JSON.stringify({ error: "Bloqué par LLM Guard — données sensibles détectées." }),
         { status: 403, headers: { "Content-Type": "application/json" } }
       );
+    }
+
+    // ── Mode REVIEW ──
+    // Pause the fetch, show a redaction-diff modal, and act on the user's
+    // decision. On "edit" we re-run scanForPII so newly-introduced PII is
+    // caught before send; the loop terminates on send, cancel, or an edit
+    // that left the prompt clean.
+    if (CONFIG.mode === "review") {
+      let textToReview = promptText;
+      let currentFindings = findings;
+      let approvedText = null;
+      while (true) {
+        const { anonymized, mappings, changed } = await anonymizeText(textToReview);
+        if (!changed) {
+          approvedText = textToReview;
+          logEvent({
+            action: "REVIEW_EDITED_CLEAN",
+            endpoint: url,
+            promptLength: textToReview.length,
+          }, ACTIVE_LLM);
+          break;
+        }
+        const decision = await window.__llmGuard.ui.showRedactionDiff({
+          anonymized,
+          mappings,
+          activeLLM: ACTIVE_LLM,
+        });
+        if (decision.action === "cancel") {
+          logEvent({
+            action: "REVIEW_CANCELLED",
+            endpoint: url,
+            findings: currentFindings,
+          }, ACTIVE_LLM);
+          return new Response(
+            JSON.stringify({ error: "Annulé par l'utilisateur via LLM Guard." }),
+            { status: 499, headers: { "Content-Type": "application/json" } }
+          );
+        }
+        if (decision.action === "edit") {
+          textToReview = decision.editedText;
+          currentFindings = await scanForPII(textToReview);
+          continue;
+        }
+        approvedText = anonymized;
+        logEvent({
+          action: "REVIEW_APPROVED",
+          endpoint: url,
+          mode: "review",
+          promptLength: textToReview.length,
+          findings: currentFindings,
+          mappingsCount: mappings.size,
+          anonymizedPreview: anonymized.slice(0, 100) + "...",
+        }, ACTIVE_LLM);
+        break;
+      }
+      const newBody = injectAnonymized(bodyText, approvedText, ACTIVE_LLM.adapter);
+      fetchArgs = [url, { ...init, body: newBody }];
+      const response = await originalFetch.apply(this, fetchArgs);
+      return wrapResponseForDeanonymization(response);
     }
 
     // ── Mode ANONYMIZE / VISIBLE ──

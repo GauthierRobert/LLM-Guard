@@ -7,3 +7,9 @@ infra/.env
 dashboard/node_modules/
 dashboard/dist/
 dashboard/.angular/
+node_modules/
+e2e/.test-artifacts/
+e2e/.test-artifacts-smoke/
+e2e/playwright-report/
+e2e/playwright-report-smoke/
+test-results/

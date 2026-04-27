@@ -15,7 +15,7 @@
  *     an arbitrary file.
  */
 
-const VALID_MODES = new Set(["block", "visible", "anonymize"]);
+const VALID_MODES = new Set(["block", "visible", "anonymize", "review"]);
 const SHA256_HEX = /^[a-f0-9]{64}$/i;
 const MAX_FILENAME_LEN = 256;
 

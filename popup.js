@@ -256,7 +256,7 @@ function loadLogs() {
 function loadMode() {
   chrome.storage.local.get(["guard_mode"], (r) => {
     const raw = r.guard_mode || "anonymize";
-    const mode = ["block", "visible", "anonymize"].includes(raw) ? raw : "anonymize";
+    const mode = ["block", "visible", "anonymize", "review"].includes(raw) ? raw : "anonymize";
     document.querySelectorAll(".mode-btn").forEach(b =>
       b.classList.toggle("active", b.dataset.mode === mode)
     );

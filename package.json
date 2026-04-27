@@ -6,12 +6,18 @@
   "scripts": {
     "build": "node build.js",
     "test": "node tests/test-scanner-v2.js && node tests/test-advanced-engine.js && node tests/test-llm-adapters.js && node tests/test-allowlist.js && node tests/test-company-rules.js && node tests/test-telemetry.js && node tests/test-anonymizer.js && node tests/test-layer4-wiring.js && node tests/test-attachment-scanner.js && node tests/test-detection-upgrade.js && node tests/test-improvements.js",
+    "e2e": "playwright test --config=e2e/playwright.config.js",
+    "e2e:headed": "playwright test --config=e2e/playwright.config.js --headed",
+    "e2e:debug": "playwright test --config=e2e/playwright.config.js --debug",
+    "e2e:smoke": "playwright test --config=e2e/playwright.smoke.config.js",
+    "e2e:smoke:debug": "playwright test --config=e2e/playwright.smoke.config.js --debug",
     "lint": "eslint . --ext .js",
     "lint:fix": "eslint . --ext .js --fix",
     "format": "prettier --write \"**/*.{js,json,md}\"",
     "format:check": "prettier --check \"**/*.{js,json,md}\""
   },
   "devDependencies": {
+    "@playwright/test": "^1.49.0",
     "eslint": "^8.57.0",
     "prettier": "^3.2.5"
   }

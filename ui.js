@@ -198,10 +198,11 @@
     badge.addEventListener("mouseleave", () => {
       badge.style.transform = "scale(1)";
     });
-    const MODE_CYCLE = ["anonymize", "visible", "block"];
+    const MODE_CYCLE = ["anonymize", "visible", "review", "block"];
     const MODE_COLORS = {
       anonymize: activeLLM.color,
       visible: "#7C3AED",
+      review: "#D97706",
       block: "#A32D2D",
     };
     badge.addEventListener("click", () => {
@@ -239,6 +240,240 @@
       event.action,
       event
     );
+  }
+
+  // ── Review mode: pre-send redaction diff modal ───────────────
+  // Builds an inline-highlighted preview of the anonymized prompt and pauses
+  // the fetch on a Promise. Resolves with one of:
+  //   { action: "send" }                       — dispatch the anonymized body
+  //   { action: "cancel" }                     — abort with a 499 in caller
+  //   { action: "edit", editedText: string }   — caller re-scans the edit
+  //
+  // Caller (content.js) loops on "edit": re-scan, re-anonymize, re-open if
+  // the edit introduced new PII. The textarea is pre-filled with the
+  // anonymized text (placeholders, not originals) so a screenshot of the
+  // edit view does not leak raw PII.
+  function showRedactionDiff({ anonymized, mappings, activeLLM }) {
+    return new Promise((resolve) => {
+      const existing = document.getElementById("llm-guard-review-backdrop");
+      if (existing) existing.remove();
+
+      const backdrop = document.createElement("div");
+      backdrop.id = "llm-guard-review-backdrop";
+      backdrop.setAttribute("style", [
+        "position: fixed", "inset: 0", "z-index: 1000000",
+        "background: rgba(0,0,0,0.55)",
+        "display: flex", "align-items: center", "justify-content: center",
+        "font-family: system-ui, -apple-system, sans-serif",
+        "animation: llmGuardFade 0.15s ease-out",
+      ].join(";"));
+
+      const card = document.createElement("div");
+      card.setAttribute("role", "dialog");
+      card.setAttribute("aria-modal", "true");
+      card.setAttribute("aria-labelledby", "llm-guard-review-title");
+      card.setAttribute("style", [
+        "background: #14151a", "color: #d1d0c7",
+        "border: 1px solid #2a2b30", "border-radius: 10px",
+        "width: min(640px, calc(100vw - 32px))",
+        "max-height: calc(100vh - 64px)",
+        "display: flex", "flex-direction: column",
+        "box-shadow: 0 12px 40px rgba(0,0,0,0.5)",
+      ].join(";"));
+
+      // Header
+      const header = document.createElement("div");
+      header.setAttribute("style", "padding:14px 18px;border-bottom:1px solid #1e1f23");
+      const title = document.createElement("div");
+      title.id = "llm-guard-review-title";
+      title.setAttribute("style", "font-size:14px;font-weight:600;color:#e1f5ee");
+      title.textContent = `\u{1F6E1} À envoyer à ${activeLLM.name}`;
+      const subtitle = document.createElement("div");
+      subtitle.setAttribute("style", "font-size:12px;color:#888780;margin-top:3px");
+      const n = mappings ? mappings.size : 0;
+      subtitle.textContent = `${n} donnée(s) seront remplacée(s) par des placeholders. Vérifiez avant l'envoi.`;
+      header.appendChild(title);
+      header.appendChild(subtitle);
+
+      // Body container — swapped between preview <pre> and edit <textarea>
+      const body = document.createElement("div");
+      body.setAttribute("style", "padding:14px 18px;overflow-y:auto;flex:1;min-height:120px");
+
+      const preview = document.createElement("pre");
+      preview.setAttribute("style", [
+        "margin: 0", "padding: 10px 12px",
+        "background: #0e0f11", "border: 1px solid #1e1f23", "border-radius: 6px",
+        "font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace",
+        "font-size: 12.5px", "line-height: 1.5",
+        "white-space: pre-wrap", "word-break: break-word",
+        "color: #d1d0c7",
+      ].join(";"));
+
+      // Build segments by scanning the anonymized text for each mapping value.
+      // mappings is Map<original, placeholder>; we walk by placeholder so the
+      // highlighted spans align exactly with what the LLM will receive.
+      const placeholderToOriginal = new Map();
+      if (mappings) {
+        for (const [orig, ph] of mappings.entries()) placeholderToOriginal.set(ph, orig);
+      }
+      const placeholders = Array.from(placeholderToOriginal.keys()).sort((a, b) => b.length - a.length);
+
+      function appendSegments(target, text) {
+        if (placeholders.length === 0) {
+          target.appendChild(document.createTextNode(text));
+          return;
+        }
+        let i = 0;
+        while (i < text.length) {
+          let matched = null;
+          for (const ph of placeholders) {
+            if (text.startsWith(ph, i)) { matched = ph; break; }
+          }
+          if (matched) {
+            const mark = document.createElement("mark");
+            mark.setAttribute("style", [
+              "background: #4a2f0a", "color: #fac775",
+              "padding: 1px 4px", "border-radius: 3px",
+              "border: 1px solid #854f0b",
+              "cursor: help",
+            ].join(";"));
+            // Keep the original off the visible DOM tree (data-* + title only).
+            mark.setAttribute("data-original", placeholderToOriginal.get(matched));
+            mark.setAttribute("title", `Original : ${placeholderToOriginal.get(matched)}`);
+            mark.textContent = matched;
+            target.appendChild(mark);
+            i += matched.length;
+          } else {
+            let nextIdx = text.length;
+            for (const ph of placeholders) {
+              const idx = text.indexOf(ph, i);
+              if (idx !== -1 && idx < nextIdx) nextIdx = idx;
+            }
+            target.appendChild(document.createTextNode(text.slice(i, nextIdx)));
+            i = nextIdx;
+          }
+        }
+      }
+      appendSegments(preview, anonymized);
+      body.appendChild(preview);
+
+      // Findings list (collapsed by default)
+      if (n > 0) {
+        const details = document.createElement("details");
+        details.setAttribute("style", "margin-top:12px");
+        const summary = document.createElement("summary");
+        summary.setAttribute("style", "cursor:pointer;font-size:12px;color:#9fe1cb;user-select:none");
+        summary.textContent = `Voir les ${n} remplacement(s)`;
+        details.appendChild(summary);
+        const list = document.createElement("ul");
+        list.setAttribute("style", "margin:8px 0 0 0;padding-left:18px;font-size:12px;color:#b4b2a9;font-family:ui-monospace,Menlo,Consolas,monospace");
+        for (const [orig, ph] of mappings.entries()) {
+          const li = document.createElement("li");
+          li.setAttribute("style", "padding:2px 0");
+          const o = document.createElement("span");
+          o.setAttribute("style", "color:#f5c4b3");
+          o.textContent = orig;
+          const arrow = document.createElement("span");
+          arrow.setAttribute("style", "color:#5f5e5a;margin:0 6px");
+          arrow.textContent = "→";
+          const p = document.createElement("span");
+          p.setAttribute("style", "color:#fac775");
+          p.textContent = ph;
+          li.appendChild(o); li.appendChild(arrow); li.appendChild(p);
+          list.appendChild(li);
+        }
+        details.appendChild(list);
+        body.appendChild(details);
+      }
+
+      // Footer with action buttons
+      const footer = document.createElement("div");
+      footer.setAttribute("style", "padding:12px 18px;border-top:1px solid #1e1f23;display:flex;gap:8px;justify-content:flex-end;flex-wrap:wrap");
+
+      const baseBtnStyle = "padding:7px 14px;border-radius:5px;cursor:pointer;font-size:12px;font-weight:500;border:1px solid";
+
+      const cancelBtn = document.createElement("button");
+      cancelBtn.type = "button";
+      cancelBtn.textContent = "Annuler";
+      cancelBtn.setAttribute("style", `${baseBtnStyle} #2a2b30;background:transparent;color:#888780`);
+
+      const editBtn = document.createElement("button");
+      editBtn.type = "button";
+      editBtn.textContent = "Modifier";
+      editBtn.setAttribute("style", `${baseBtnStyle} #2a2b30;background:transparent;color:#d1d0c7`);
+
+      const sendBtn = document.createElement("button");
+      sendBtn.type = "button";
+      sendBtn.textContent = "Envoyer anonymisé";
+      sendBtn.setAttribute("style", `${baseBtnStyle} #0F6E56;background:#0F6E56;color:#e1f5ee`);
+
+      footer.appendChild(cancelBtn);
+      footer.appendChild(editBtn);
+      footer.appendChild(sendBtn);
+
+      card.appendChild(header);
+      card.appendChild(body);
+      card.appendChild(footer);
+      backdrop.appendChild(card);
+
+      let editTextarea = null;
+      let resolved = false;
+      function done(value) {
+        if (resolved) return;
+        resolved = true;
+        document.removeEventListener("keydown", onKey, true);
+        backdrop.remove();
+        resolve(value);
+      }
+
+      function enterEditMode() {
+        if (editTextarea) return;
+        editTextarea = document.createElement("textarea");
+        editTextarea.setAttribute("style", [
+          "width: 100%", "min-height: 180px", "max-height: 50vh",
+          "padding: 10px 12px",
+          "background: #0e0f11", "border: 1px solid #1e1f23", "border-radius: 6px",
+          "font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace",
+          "font-size: 12.5px", "line-height: 1.5",
+          "color: #d1d0c7", "resize: vertical",
+        ].join(";"));
+        editTextarea.value = anonymized;
+        body.replaceChild(editTextarea, preview);
+        editTextarea.focus();
+        editBtn.disabled = true;
+        editBtn.style.opacity = "0.5";
+        editBtn.style.cursor = "not-allowed";
+        sendBtn.textContent = "Re-scanner et envoyer";
+      }
+
+      cancelBtn.addEventListener("click", () => done({ action: "cancel" }));
+      editBtn.addEventListener("click", enterEditMode);
+      sendBtn.addEventListener("click", () => {
+        if (editTextarea) done({ action: "edit", editedText: editTextarea.value });
+        else done({ action: "send" });
+      });
+
+      function onKey(e) {
+        if (e.key === "Escape") { e.stopPropagation(); done({ action: "cancel" }); }
+        else if (e.key === "Enter" && (e.ctrlKey || e.metaKey)) {
+          e.stopPropagation();
+          if (editTextarea) done({ action: "edit", editedText: editTextarea.value });
+          else done({ action: "send" });
+        }
+      }
+      document.addEventListener("keydown", onKey, true);
+
+      if (!document.getElementById("llmGuardStyles")) {
+        const style = document.createElement("style");
+        style.id = "llmGuardStyles";
+        style.textContent = "@keyframes llmGuardFade{from{opacity:0}to{opacity:1}}";
+        document.head.appendChild(style);
+      }
+
+      const mount = () => document.body.appendChild(backdrop);
+      if (document.body) mount();
+      else document.addEventListener("DOMContentLoaded", mount);
+    });
   }
 
   // ── Visible mode: floating Reveal/Hide toggle ────────────────
@@ -640,6 +875,6 @@
   // Browser only -- all functions require DOM APIs
   if (typeof window !== "undefined") {
     window.__llmGuard = window.__llmGuard || {};
-    window.__llmGuard.ui = { showBanner, addStatusBadge, logEvent, addRevealToggleButton, updateRevealButton, reapplyRevealState };
+    window.__llmGuard.ui = { showBanner, addStatusBadge, logEvent, addRevealToggleButton, updateRevealButton, reapplyRevealState, showRedactionDiff };
   }
 })();

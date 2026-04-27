@@ -140,11 +140,13 @@
   <div class="mode-toggle">
     <button class="mode-btn" data-mode="anonymize">Anonymiser</button>
     <button class="mode-btn" data-mode="visible">Visible</button>
+    <button class="mode-btn" data-mode="review">Réviser</button>
     <button class="mode-btn" data-mode="block">Bloquer</button>
   </div>
   <div class="mode-help">
     <div class="item"><b>Anonymiser</b> — les PII sont remplacées par des placeholders (<code>[EMAIL_1]</code>…) avant l'envoi au LLM. La réponse est automatiquement désanonymisée pour que vous lisiez les vraies valeurs.</div>
     <div class="item"><b>Visible</b> — anonymisation identique en sortie, mais les placeholders restent affichés dans votre message et la réponse. Un bouton « Révéler les PII » permet de basculer l'affichage vers les vraies valeurs à la demande.</div>
+    <div class="item"><b>Réviser</b> — quand des PII sont détectées, l'envoi est mis en pause et un aperçu vous montre exactement ce qui sera transmis au LLM (placeholders surlignés). Vous confirmez, modifiez ou annulez avant que la requête parte.</div>
     <div class="item"><b>Bloquer</b> — un envoi contenant une PII critique est interrompu (HTTP 403 local). Rien n'est transmis au LLM.</div>
   </div>
 </div>
