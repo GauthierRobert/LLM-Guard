@@ -1,0 +1,134 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>LLM Guard — Settings</title>
+    <link rel="stylesheet" href="./options.css" />
+  </head>
+  <body>
+    <div class="page">
+      <header class="page-header">
+        <span class="brand">
+          <svg
+            class="shield"
+            viewBox="0 0 24 24"
+            width="26"
+            height="26"
+            aria-hidden="true"
+          >
+            <path
+              fill="currentColor"
+              d="M12 2 4 5v6c0 5 3.4 9.4 8 11 4.6-1.6 8-6 8-11V5l-8-3Z"
+            />
+            <path
+              fill="#fff"
+              d="m10.6 14.6-2.3-2.3 1.1-1.1 1.2 1.2 3.3-3.3 1.1 1.1-4.4 4.4Z"
+            />
+          </svg>
+          <h1>LLM Guard</h1>
+        </span>
+        <p class="tagline">Settings</p>
+      </header>
+
+      <!-- Protection -->
+      <section class="card">
+        <h2 class="card-title">Protection</h2>
+
+        <div class="row">
+          <div class="row-text">
+            <span class="row-title">Enable protection</span>
+            <span class="row-sub"
+              >Scan prompts before they reach the LLM service.</span
+            >
+          </div>
+          <label class="switch" title="Enable protection">
+            <input
+              type="checkbox"
+              id="enabled"
+              aria-label="Enable protection"
+            />
+            <span class="track" aria-hidden="true"></span>
+          </label>
+        </div>
+
+        <fieldset class="modes" aria-label="Protection mode">
+          <legend class="sr-only">Protection mode</legend>
+
+          <label class="mode-option">
+            <input type="radio" name="mode" value="anonymize" />
+            <span class="mode-text">
+              <span class="mode-name">Anonymize</span>
+              <span class="mode-desc"
+                >Replace sensitive values with [TYPE] placeholders and restore
+                them in responses</span
+              >
+            </span>
+          </label>
+
+          <label class="mode-option">
+            <input type="radio" name="mode" value="warn" />
+            <span class="mode-text">
+              <span class="mode-name">Warn</span>
+              <span class="mode-desc"
+                >Notify but send the prompt unchanged</span
+              >
+            </span>
+          </label>
+
+          <label class="mode-option">
+            <input type="radio" name="mode" value="block" />
+            <span class="mode-text">
+              <span class="mode-name">Block</span>
+              <span class="mode-desc"
+                >Refuse to send prompts containing high-risk data</span
+              >
+            </span>
+          </label>
+        </fieldset>
+      </section>
+
+      <!-- Supported services -->
+      <section class="card">
+        <h2 class="card-title">Supported services</h2>
+        <ul class="services" id="services"></ul>
+      </section>
+
+      <!-- Activity -->
+      <section class="card">
+        <h2 class="card-title">Activity</h2>
+        <p class="note">
+          All detection logs and statistics stay local in this browser. Nothing
+          is ever uploaded.
+        </p>
+        <div class="row">
+          <button type="button" id="clear" class="btn btn-danger">
+            Clear activity &amp; stats
+          </button>
+          <span id="toast" class="toast" role="status" aria-live="polite"></span>
+        </div>
+      </section>
+
+      <!-- About -->
+      <section class="card">
+        <h2 class="card-title">About</h2>
+        <dl class="about">
+          <div>
+            <dt>Name</dt>
+            <dd>LLM Guard</dd>
+          </div>
+          <div>
+            <dt>Version</dt>
+            <dd id="version">—</dd>
+          </div>
+          <div>
+            <dt>Description</dt>
+            <dd>Detects and anonymizes sensitive data in your LLM prompts.</dd>
+          </div>
+        </dl>
+      </section>
+    </div>
+
+    <script type="module" src="./options.ts"></script>
+  </body>
+</html>

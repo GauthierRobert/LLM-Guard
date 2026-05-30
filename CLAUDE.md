@@ -2,7 +2,52 @@
 
 This file provides guidance to Claude Code (claude.ai/code) when working with code in this repository.
 
-## Project Overview
+## Project Overview (v3 — current)
+
+**LLM Guard v3** is a clean-room rewrite of the Chrome extension (Manifest V3) in **TypeScript**, bundled with **Vite + `@crxjs/vite-plugin`** and tested with **Vitest**. It intercepts prompts sent to LLM services and either **anonymizes** PII with reversible `[TYPE_xxxx]` placeholders (restored in streamed responses), **warns**, or **blocks** the request — controlled by a single `mode` setting.
+
+The new extension lives entirely under **`extension/`**. The previous vanilla-JS v2 (4-layer engine, telemetry, company rules) is archived under **`legacy/`** for reference. The self-hosted backend/dashboard (`api-java/`, `dashboard/`, `infra/`, `shared/`) are unchanged.
+
+### Working on the extension (`extension/`)
+
+```bash
+cd extension
+npm install        # or rely on the SessionStart hook (.claude/hooks/session-start.sh)
+npm run dev        # Vite dev build with HMR (load extension/dist unpacked)
+npm run build      # tsc --noEmit + production build to extension/dist
+npm test           # Vitest unit suite (core detection, anonymizer, adapters)
+npm run typecheck  # tsc --noEmit
+npm run lint       # ESLint (flat config, typescript-eslint)
+```
+
+Load unpacked: `chrome://extensions` → Developer mode → **Load unpacked** → select `extension/dist`.
+
+### Architecture (`extension/src/`)
+
+| Path | Role |
+|------|------|
+| `shared/types.ts` | Domain contracts: `Severity`, `PIIPattern`, `Finding`, `ScanResult`, `AnonymizeResult`, `IAnonymizer` |
+| `shared/messages.ts` | Cross-context messaging + `GuardConfig` + storage keys |
+| `core/pii-patterns.ts` | 29 PII regex patterns (+ validators in `validators.ts`) |
+| `core/match.ts` | Runs all patterns and resolves **overlapping spans** into one non-overlapping set |
+| `core/detector.ts` | `scan(text)` → findings + aggregate severity (regex + keywords) |
+| `core/anonymizer.ts` | `Anonymizer` class: span-based reversible placeholders + stream de-anonymizer |
+| `adapters/*.ts` | Per-service request shapers (ChatGPT, Claude, Gemini, Copilot, Mistral, Perplexity, DeepSeek, Grok) implementing `LLMAdapter` |
+| `content/main-world.ts` | MAIN world: monkey-patches `window.fetch`, applies mode, de-anonymizes responses |
+| `content/bridge.ts` | ISOLATED world: relays detection events ⇄ config between page and service worker |
+| `background/service-worker.ts` | Stores logs/stats, updates the toolbar badge |
+| `ui/banner.ts` | In-page toast (createElement/textContent only) |
+| `popup/`, `options/` | Popup dashboard + options page (mode, stats, activity) |
+
+**Detection pipeline:** Layer-1 regex (overlap-resolved) + Layer-1.5 keyword matching → anonymize / warn / block. The heavier v2 layers (fuzzy, contextual, LLM classifier) and telemetry were intentionally dropped to keep v3 lean and fast.
+
+**Adding an LLM:** add an adapter in `extension/src/adapters/` (implement `LLMAdapter`), register it in `adapters/index.ts`, and add the hostname globs to `extension/manifest.config.ts`.
+
+---
+
+## Legacy (v2 — archived under `legacy/`)
+
+> The sections below describe the archived v2 vanilla-JS extension, now under `legacy/`. Kept for reference; not the active codebase. Paths in those sections are relative to `legacy/`.
 
 **LLM Guard v2** is a Chrome extension (Manifest V3) that intercepts prompts sent to LLM services (ChatGPT, Claude, Gemini, Copilot), detects PII using a 4-layer system, and anonymizes/blocks/warns based on configured mode. No build step required — vanilla JavaScript, load unpacked into Chrome.
 

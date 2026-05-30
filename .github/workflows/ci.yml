@@ -8,23 +8,26 @@ on:
 
 jobs:
   extension:
-    name: Extension — tests + lint + format
+    name: Extension — typecheck + tests + lint + build
     runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: extension
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4
         with:
-          node-version: "20"
-      - name: Install dev tooling
-        run: npm install --no-save eslint@^8.57.0 prettier@^3.2.5
-      - name: Build generated config
-        run: node build.js
-      - name: Run unit tests
+          node-version: "22"
+      - name: Install
+        run: npm install --no-audit --no-fund
+      - name: Typecheck
+        run: npm run typecheck
+      - name: Lint
+        run: npm run lint
+      - name: Test
         run: npm test
-      - name: ESLint
-        run: npx eslint . --ext .js
-      - name: Prettier (check only)
-        run: npx prettier --check "**/*.{js,json,md}"
+      - name: Build
+        run: npm run build
 
   backend:
     name: Java backend — Gradle build + tests

@@ -1,0 +1,82 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>LLM Guard</title>
+    <link rel="stylesheet" href="./popup.css" />
+  </head>
+  <body>
+    <header class="header">
+      <span class="brand">
+        <svg
+          class="shield"
+          viewBox="0 0 24 24"
+          width="22"
+          height="22"
+          aria-hidden="true"
+        >
+          <path
+            fill="currentColor"
+            d="M12 2 4 5v6c0 5 3.4 9.4 8 11 4.6-1.6 8-6 8-11V5l-8-3Z"
+          />
+          <path
+            fill="#fff"
+            d="m10.6 14.6-2.3-2.3 1.1-1.1 1.2 1.2 3.3-3.3 1.1 1.1-4.4 4.4Z"
+          />
+        </svg>
+        <h1 class="title">LLM Guard</h1>
+      </span>
+      <label class="switch" title="Enable protection">
+        <input type="checkbox" id="enabled" aria-label="Enable protection" />
+        <span class="track" aria-hidden="true"></span>
+      </label>
+    </header>
+
+    <main>
+      <fieldset class="segmented" aria-label="Protection mode">
+        <legend class="sr-only">Protection mode</legend>
+        <label class="seg">
+          <input type="radio" name="mode" value="anonymize" />
+          <span>Anonymize</span>
+        </label>
+        <label class="seg">
+          <input type="radio" name="mode" value="warn" />
+          <span>Warn</span>
+        </label>
+        <label class="seg">
+          <input type="radio" name="mode" value="block" />
+          <span>Block</span>
+        </label>
+      </fieldset>
+
+      <section class="stats" aria-label="Today's activity">
+        <div class="stat-card">
+          <span class="stat-value" id="stat-anonymized">0</span>
+          <span class="stat-label">Anonymized</span>
+        </div>
+        <div class="stat-card">
+          <span class="stat-value" id="stat-blocked">0</span>
+          <span class="stat-label">Blocked</span>
+        </div>
+        <div class="stat-card">
+          <span class="stat-value" id="stat-total">0</span>
+          <span class="stat-label">Total</span>
+        </div>
+      </section>
+
+      <section class="activity" aria-label="Recent activity">
+        <h2 class="section-title">Recent activity</h2>
+        <ul id="activity" class="activity-list"></ul>
+      </section>
+    </main>
+
+    <footer class="footer">
+      <button type="button" id="open-options" class="link-btn">
+        Advanced settings
+      </button>
+    </footer>
+
+    <script type="module" src="./popup.ts"></script>
+  </body>
+</html>
