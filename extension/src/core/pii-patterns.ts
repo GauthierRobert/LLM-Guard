@@ -153,7 +153,7 @@ export const PII_PATTERNS: PIIPattern[] = [
   {
     type: "DOB",
     label: "Date de naissance",
-    regex: /\b(?:0[1-9]|[12]\d|3[01])[\/.-](?:0[1-9]|1[0-2])[\/.-](?:19|20)\d{2}\b/g,
+    regex: /\b(?:0[1-9]|[12]\d|3[01])[/.-](?:0[1-9]|1[0-2])[/.-](?:19|20)\d{2}\b/g,
     severity: "medium",
   },
   {

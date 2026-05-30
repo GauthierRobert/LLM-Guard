@@ -1,4 +1,10 @@
-# LLM Guard v2 — Extension Chrome Multi-LLM, RGPD & AI Act
+# LLM Guard
+
+> **v3 (current):** the Chrome extension has been rewritten in TypeScript (Vite + `@crxjs`, Vitest) and now lives in **[`extension/`](extension/)** — see [`extension/README.md`](extension/README.md). The previous vanilla-JS v2 is archived under **`legacy/`**. The notes below describe v2 and the broader project (backend/dashboard).
+
+---
+
+## LLM Guard v2 — Extension Chrome Multi-LLM, RGPD & AI Act
 
 Extension Chrome qui intercepte, anonymise et journalise les prompts envoyés à **ChatGPT, Claude, Gemini et Copilot** pour assurer la conformité RGPD et AI Act.
 
