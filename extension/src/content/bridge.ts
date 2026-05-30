@@ -4,64 +4,128 @@
  * Bridges the MAIN-world fetch interceptor (which cannot touch chrome.*) with
  * the service worker and chrome.storage:
  *   - relays detection events MAIN → service worker
- *   - serves config to the page (on request, on load, and on storage change)
+ *   - serves config + rules to the page (on request, on load, on storage change)
+ *   - relays reveal/hide commands from the popup (chrome.tabs.sendMessage) → MAIN
+ *     and the reveal result back to the popup
  */
 
 import {
   CONFIG_STORAGE_KEY,
   DEFAULT_CONFIG,
   GUARD_NS,
+  RULES_STORAGE_KEY,
   isGuardMessage,
   type GuardConfig,
+  type RevealResponse,
+  type TabMessage,
 } from "@/shared/messages";
 
 async function readConfig(): Promise<GuardConfig> {
   try {
     const stored = await chrome.storage.sync.get(CONFIG_STORAGE_KEY);
-    const value = stored[CONFIG_STORAGE_KEY] as GuardConfig | undefined;
-    return value ?? DEFAULT_CONFIG;
+    return (stored[CONFIG_STORAGE_KEY] as GuardConfig | undefined) ?? DEFAULT_CONFIG;
   } catch {
     return DEFAULT_CONFIG;
   }
 }
 
-function postConfig(config: GuardConfig): void {
+async function readRulesYaml(): Promise<string | null> {
   try {
-    window.postMessage(
-      { ns: GUARD_NS, kind: "config", payload: config },
-      location.origin,
-    );
+    const stored = await chrome.storage.sync.get(RULES_STORAGE_KEY);
+    return (stored[RULES_STORAGE_KEY] as string | undefined) ?? null;
+  } catch {
+    return null;
+  }
+}
+
+function post(message: object): void {
+  try {
+    window.postMessage(message, location.origin);
   } catch {
     /* never throw onto the page */
   }
 }
 
-async function pushCurrentConfig(): Promise<void> {
-  postConfig(await readConfig());
+async function pushConfig(): Promise<void> {
+  post({ ns: GUARD_NS, kind: "config", payload: await readConfig() });
 }
+
+async function pushRules(): Promise<void> {
+  const yaml = await readRulesYaml();
+  // null → MAIN keeps its bundled default compiled rules.
+  if (yaml !== null) post({ ns: GUARD_NS, kind: "rules", payload: { yaml } });
+}
+
+/* ----------------------- MAIN ⇄ ISOLATED (postMessage) -------------------- */
+
+// Pending reveal request awaiting MAIN's result, so we can answer the popup.
+let pendingReveal: ((r: RevealResponse) => void) | null = null;
 
 window.addEventListener("message", (event: MessageEvent) => {
   if (event.source !== window) return;
   if (!isGuardMessage(event.data)) return;
-
   const data = event.data;
+
   if (data.kind === "detection") {
     try {
       void chrome.runtime.sendMessage({ kind: "detection", payload: data.payload });
     } catch {
-      /* worker may be asleep / context invalidated */
+      /* worker asleep / context invalidated */
     }
   } else if (data.kind === "config-request") {
-    void pushCurrentConfig();
+    void pushConfig();
+    void pushRules();
+  } else if (data.kind === "reveal-result") {
+    if (pendingReveal) {
+      pendingReveal({
+        ok: data.payload.ok,
+        reveal: data.payload.reveal,
+        replaced: data.payload.replaced,
+      });
+      pendingReveal = null;
+    }
   }
 });
 
+/* ---------------------- popup → tab → MAIN (reveal) ------------------------ */
+
+chrome.runtime.onMessage.addListener(
+  (message: TabMessage, _sender, sendResponse): boolean => {
+    if (message?.kind === "reveal") {
+      // Replace any earlier pending waiter; answer it as a no-op.
+      if (pendingReveal) pendingReveal({ ok: false, reveal: false, replaced: 0 });
+      pendingReveal = sendResponse;
+      post({ ns: GUARD_NS, kind: "reveal", payload: { reveal: message.reveal } });
+      // Safety net: if MAIN never answers, release the channel.
+      setTimeout(() => {
+        if (pendingReveal === sendResponse) {
+          pendingReveal({ ok: false, reveal: false, replaced: 0 });
+          pendingReveal = null;
+        }
+      }, 3000);
+      return true; // async response
+    }
+    return false;
+  },
+);
+
+/* --------------------------- storage change feed -------------------------- */
+
 chrome.storage.onChanged.addListener((changes, area) => {
   if (area !== "sync") return;
-  if (!(CONFIG_STORAGE_KEY in changes)) return;
-  const next = changes[CONFIG_STORAGE_KEY]?.newValue as GuardConfig | undefined;
-  postConfig(next ?? DEFAULT_CONFIG);
+  if (CONFIG_STORAGE_KEY in changes) {
+    post({
+      ns: GUARD_NS,
+      kind: "config",
+      payload: (changes[CONFIG_STORAGE_KEY]?.newValue as GuardConfig | undefined) ?? DEFAULT_CONFIG,
+    });
+  }
+  if (RULES_STORAGE_KEY in changes) {
+    const yaml = changes[RULES_STORAGE_KEY]?.newValue as string | undefined;
+    if (typeof yaml === "string") post({ ns: GUARD_NS, kind: "rules", payload: { yaml } });
+  }
 });
 
-// Push current config immediately on load (page may already be listening).
-void pushCurrentConfig();
+// Push current config + rules immediately on load.
+void pushConfig();
+void pushRules();

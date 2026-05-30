@@ -1,0 +1,202 @@
+# ============================================================================
+# LLM Guard — detection rules
+#
+# Edited by the DPO (Data Protection Officer). Saved to your browser's synced
+# storage. Each rule says WHAT to look for and WHAT to do:
+#
+#   action: anonymize  ->  replace with a placeholder like [EMAIL_a1b2]
+#                          (you can reveal the real values later from the popup)
+#   action: block      ->  refuse to send the prompt at all
+#   action: warn       ->  warn you, but send the prompt unchanged
+#
+# Rule kinds:
+#   kind: words        ->  exact word/phrase, case-insensitive  (list in "words")
+#   kind: regex        ->  a pattern  (in "pattern")
+#   kind: combination  ->  fires only if ALL the conditions in "all" appear
+#
+# Built-in checks for credit cards, IBANs, JWTs and IPs run automatically
+# (with maths validation) on top of these rules.
+# ============================================================================
+version: 1
+
+# Used when a rule does not set its own action / severity.
+defaults:
+  action: anonymize
+  severity: medium
+
+# Values here are NEVER flagged, even if a rule below would match them.
+whitelist:
+  - "support@example.com"
+
+# Values here are ALWAYS flagged with the action below.
+blacklist:
+  action: block
+  severity: critical
+  values: []
+
+rules:
+  # ----------------------------- Contact details ----------------------------
+  - id: email
+    description: Email addresses
+    kind: regex
+    action: anonymize
+    severity: high
+    placeholder: EMAIL
+    pattern: "[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\\.[a-zA-Z]{2,}"
+
+  - id: phone-fr
+    description: French phone numbers
+    kind: regex
+    action: anonymize
+    severity: high
+    placeholder: PHONE
+    pattern: "(?:\\+33|0)\\s*[1-9](?:[\\s.-]*\\d{2}){4}"
+
+  - id: phone-intl
+    description: International phone numbers
+    kind: regex
+    action: anonymize
+    severity: medium
+    placeholder: PHONE
+    pattern: "\\+\\d{1,3}[\\s.-]?\\d{4,14}"
+
+  - id: address-fr
+    description: French postal addresses
+    kind: regex
+    action: anonymize
+    severity: high
+    placeholder: ADDRESS
+    pattern: "\\d{1,4}\\s+(?:rue|avenue|boulevard|place|impasse|allée|chemin|route)\\s+[\\w\\s-]{3,40}"
+
+  - id: person-fr
+    description: Names with a French title (M., Mme, Dr…)
+    kind: regex
+    action: anonymize
+    severity: high
+    placeholder: PERSON
+    pattern: "(?:M\\.|Mme|Mlle|Dr|Pr)\\s+\\p{Lu}\\p{Ll}+(?:\\s+\\p{Lu}\\p{Ll}+){1,2}"
+
+  # --------------------------- National identifiers --------------------------
+  - id: iban
+    description: IBAN bank account numbers
+    kind: regex
+    action: anonymize
+    severity: critical
+    placeholder: IBAN
+    pattern: "[A-Z]{2}\\d{2}\\s?(?:[\\dA-Z]{4}\\s?){2,7}[\\dA-Z]{1,4}"
+
+  - id: nss-fr
+    description: French social security number (NIR)
+    kind: regex
+    action: anonymize
+    severity: critical
+    placeholder: NSS
+    pattern: "[12]\\s?\\d{2}\\s?\\d{2}\\s?\\d{2}\\s?\\d{3}\\s?\\d{3}\\s?\\d{2}"
+
+  - id: ssn-us
+    description: US social security number
+    kind: regex
+    action: anonymize
+    severity: critical
+    placeholder: SSN
+    pattern: "\\d{3}-\\d{2}-\\d{4}"
+
+  - id: dob
+    description: Dates of birth
+    kind: regex
+    action: anonymize
+    severity: medium
+    placeholder: DOB
+    pattern: "(?:0[1-9]|[12]\\d|3[01])[/.-](?:0[1-9]|1[0-2])[/.-](?:19|20)\\d{2}"
+
+  # -------------------------------- Secrets ----------------------------------
+  - id: aws-key
+    description: AWS access key id
+    kind: regex
+    action: block
+    severity: critical
+    placeholder: AWS_KEY
+    pattern: "AKIA[0-9A-Z]{16}"
+
+  - id: github-pat
+    description: GitHub personal access token
+    kind: regex
+    action: block
+    severity: critical
+    placeholder: GH_PAT
+    pattern: "gh[pousr]_[A-Za-z0-9]{36,}"
+
+  - id: openai-key
+    description: OpenAI API key
+    kind: regex
+    action: block
+    severity: critical
+    placeholder: OPENAI_KEY
+    pattern: "sk-(?:proj-)?[A-Za-z0-9_-]{40,}"
+
+  - id: google-key
+    description: Google API key
+    kind: regex
+    action: block
+    severity: critical
+    placeholder: GOOGLE_KEY
+    pattern: "AIza[0-9A-Za-z_-]{35}"
+
+  - id: private-key
+    description: PEM private key header
+    kind: regex
+    action: block
+    severity: critical
+    placeholder: PRIVATE_KEY
+    pattern: "-----BEGIN (?:RSA |DSA |EC |OPENSSH |PGP )?PRIVATE KEY"
+
+  - id: password-assignment
+    description: An inline password / mot de passe
+    kind: regex
+    action: block
+    severity: critical
+    placeholder: PASSWORD
+    pattern: "(?:password|mot de passe|mdp|pwd)\\s*[:=]\\s*\\S+"
+
+  # ------------------------------ Infrastructure -----------------------------
+  - id: internal-domain
+    description: Internal-only hostnames
+    kind: regex
+    action: anonymize
+    severity: medium
+    placeholder: INTERNAL_DOMAIN
+    pattern: "[a-zA-Z0-9-]+\\.(?:internal|local|corp|intranet|lan)"
+
+  # --------------------------- Sensitive keywords ----------------------------
+  - id: sensitive-keywords
+    description: RGPD-sensitive terms (warn, do not block)
+    kind: words
+    action: warn
+    severity: high
+    words:
+      - "salaire"
+      - "rémunération"
+      - "bulletin de paie"
+      - "fiche de paie"
+      - "dossier médical"
+      - "diagnostic"
+      - "pathologie"
+      - "casier judiciaire"
+      - "orientation sexuelle"
+      - "appartenance syndicale"
+      - "données biométriques"
+      - "secret professionnel"
+      - "confidentiel"
+      - "NDA"
+
+  # --------------------------- Combination example ---------------------------
+  - id: salary-with-amount
+    description: A salary term next to a money amount
+    kind: combination
+    action: warn
+    severity: high
+    all:
+      - kind: words
+        words: ["salaire", "rémunération", "salary"]
+      - kind: regex
+        pattern: "\\d[\\d\\s.,]*\\s?(?:k€?|€|EUR|euros?)"

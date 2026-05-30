@@ -14,6 +14,7 @@ export const claudeAdapter: LLMAdapter = {
   id: "claude",
   label: "Claude",
   hostnames: ["claude.ai"],
+  conversationSelector: "[data-testid='conversation-turn'], .font-claude-message, main",
 
   matchEndpoint(url: string): boolean {
     return /\/api\/.*(chat|completion|message|conversation)/i.test(url);

@@ -4,36 +4,45 @@
  *   MAIN world (main-world.ts)  ──window.postMessage──▶  ISOLATED (bridge.ts)
  *   ISOLATED (bridge.ts)        ──chrome.runtime──────▶  service-worker.ts
  *   service-worker.ts           ──chrome.runtime──────▶  bridge.ts ─postMessage▶ MAIN
+ *   popup ──chrome.tabs.sendMessage──▶ bridge.ts ─postMessage▶ MAIN  (reveal)
  *
  * The MAIN world cannot touch chrome.* APIs, so the bridge owns storage and
- * relays config + detection events both ways.
+ * relays config, rules, detections and reveal commands both ways.
  */
 
 import type { Severity } from "./types";
+import type { RuleAction } from "@/core/rules/types";
 
 /** Namespace tag on every window.postMessage payload, to filter page noise. */
 export const GUARD_NS = "__LLM_GUARD__" as const;
 
-export type GuardMode = "anonymize" | "block" | "warn";
-
+/**
+ * Master config. Behavior is decided by the DPO's rules, not a global mode —
+ * this only carries the on/off switch.
+ */
 export interface GuardConfig {
   enabled: boolean;
-  mode: GuardMode;
 }
 
 export const DEFAULT_CONFIG: GuardConfig = {
   enabled: true,
-  mode: "anonymize",
 };
 
 /** chrome.storage.sync key holding the GuardConfig. */
 export const CONFIG_STORAGE_KEY = "guard_config" as const;
+/** chrome.storage.sync key holding the DPO rules YAML (a string). */
+export const RULES_STORAGE_KEY = "guard_rules_yaml" as const;
 /** chrome.storage.local key holding the rolling activity log. */
 export const LOG_STORAGE_KEY = "guard_logs" as const;
 /** chrome.storage.local key holding aggregate stats. */
 export const STATS_STORAGE_KEY = "guard_stats" as const;
 /** Max number of activity-log entries retained by the service worker. */
 export const MAX_LOG_ENTRIES = 500;
+/**
+ * Soft cap on the rules YAML size. chrome.storage.sync allows ~8KB per item;
+ * we reject earlier with a friendly message and fall back to local storage.
+ */
+export const RULES_SYNC_MAX_BYTES = 8000;
 
 export type DetectionAction = "anonymized" | "blocked" | "warned" | "clean";
 
@@ -50,7 +59,6 @@ export interface DetectionEvent {
   service: string;
   /** Hostname only — never the full URL (privacy). */
   host: string;
-  mode: GuardMode;
   action: DetectionAction;
   findings: FindingSummary[];
   /** Total sensitive values handled in this request. */
@@ -67,7 +75,7 @@ export interface DetectionMessage {
   payload: DetectionEvent;
 }
 
-/** MAIN → ISOLATED: page just booted, send me the current config. */
+/** MAIN → ISOLATED: page just booted, send me the current config + rules. */
 export interface ConfigRequestMessage {
   ns: typeof GUARD_NS;
   kind: "config-request";
@@ -80,7 +88,34 @@ export interface ConfigMessage {
   payload: GuardConfig;
 }
 
-export type GuardMessage = DetectionMessage | ConfigRequestMessage | ConfigMessage;
+/** ISOLATED → MAIN: here is the current/updated rules YAML. */
+export interface RulesMessage {
+  ns: typeof GUARD_NS;
+  kind: "rules";
+  payload: { yaml: string };
+}
+
+/** ISOLATED → MAIN: user clicked reveal/hide in the popup. */
+export interface RevealMessage {
+  ns: typeof GUARD_NS;
+  kind: "reveal";
+  payload: { reveal: boolean };
+}
+
+/** MAIN → ISOLATED: reveal/hide completed (relayed back to the popup). */
+export interface RevealResultMessage {
+  ns: typeof GUARD_NS;
+  kind: "reveal-result";
+  payload: { reveal: boolean; replaced: number; ok: boolean };
+}
+
+export type GuardMessage =
+  | DetectionMessage
+  | ConfigRequestMessage
+  | ConfigMessage
+  | RulesMessage
+  | RevealMessage
+  | RevealResultMessage;
 
 /** Type guard for window.postMessage handlers. */
 export function isGuardMessage(data: unknown): data is GuardMessage {
@@ -98,6 +133,23 @@ export type RuntimeMessage =
   | { kind: "detection"; payload: DetectionEvent }
   | { kind: "get-config" }
   | { kind: "set-config"; payload: GuardConfig }
+  | { kind: "get-rules" }
+  | { kind: "set-rules"; payload: { yaml: string } }
+  | { kind: "reset-rules" }
   | { kind: "get-stats" }
   | { kind: "get-logs" }
   | { kind: "clear-logs" };
+
+/** Reply shape for set-rules. */
+export type SetRulesResponse = { ok: true } | { ok: false; errors: string[] };
+
+/* --------------------- tab messages (popup → content) --------------------- */
+
+/** popup → active tab (received by the ISOLATED bridge). */
+export type TabMessage = { kind: "reveal"; reveal: boolean };
+
+/** Reply shape for the reveal tab message. */
+export type RevealResponse = { ok: boolean; reveal: boolean; replaced: number };
+
+/** Re-export so callers don't reach into core for the action union. */
+export type { RuleAction };

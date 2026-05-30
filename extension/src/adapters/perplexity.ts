@@ -5,6 +5,7 @@ export const perplexityAdapter: LLMAdapter = {
   id: "perplexity",
   label: "Perplexity",
   hostnames: ["perplexity.ai", "www.perplexity.ai"],
+  conversationSelector: "main",
 
   matchEndpoint(url: string): boolean {
     return (

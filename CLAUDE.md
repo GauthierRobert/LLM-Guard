@@ -4,7 +4,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## Project Overview (v3 — current)
 
-**LLM Guard v3** is a clean-room rewrite of the Chrome extension (Manifest V3) in **TypeScript**, bundled with **Vite + `@crxjs/vite-plugin`** and tested with **Vitest**. It intercepts prompts sent to LLM services and either **anonymizes** PII with reversible `[TYPE_xxxx]` placeholders (restored in streamed responses), **warns**, or **blocks** the request — controlled by a single `mode` setting.
+**LLM Guard v3** is a clean-room rewrite of the Chrome extension (Manifest V3) in **TypeScript**, bundled with **Vite + `@crxjs/vite-plugin`** and tested with **Vitest**. It intercepts prompts sent to LLM services and, according to **DPO-authored YAML rules**, either **anonymizes** sensitive data with reversible `[LABEL_xxxx]` placeholders, **warns**, or **blocks** the request — **each rule declares its own action**. Anonymization is reversible but de-anonymization is **manual**: the response keeps the placeholders and a **popup button** reveals/hides the real values directly in the page.
 
 The new extension lives entirely under **`extension/`**. The previous vanilla-JS v2 (4-layer engine, telemetry, company rules) is archived under **`legacy/`** for reference. The self-hosted backend/dashboard (`api-java/`, `dashboard/`, `infra/`, `shared/`) are unchanged.
 
@@ -26,22 +26,29 @@ Load unpacked: `chrome://extensions` → Developer mode → **Load unpacked** �
 
 | Path | Role |
 |------|------|
-| `shared/types.ts` | Domain contracts: `Severity`, `PIIPattern`, `Finding`, `ScanResult`, `AnonymizeResult`, `IAnonymizer` |
-| `shared/messages.ts` | Cross-context messaging + `GuardConfig` + storage keys |
-| `core/pii-patterns.ts` | 29 PII regex patterns (+ validators in `validators.ts`) |
-| `core/match.ts` | Runs all patterns and resolves **overlapping spans** into one non-overlapping set |
-| `core/detector.ts` | `scan(text)` → findings + aggregate severity (regex + keywords) |
-| `core/anonymizer.ts` | `Anonymizer` class: span-based reversible placeholders + stream de-anonymizer |
-| `adapters/*.ts` | Per-service request shapers (ChatGPT, Claude, Gemini, Copilot, Mistral, Perplexity, DeepSeek, Grok) implementing `LLMAdapter` |
-| `content/main-world.ts` | MAIN world: monkey-patches `window.fetch`, applies mode, de-anonymizes responses |
-| `content/bridge.ts` | ISOLATED world: relays detection events ⇄ config between page and service worker |
-| `background/service-worker.ts` | Stores logs/stats, updates the toolbar badge |
+| `shared/types.ts` | Domain contracts: `Severity`, `AnonymizeSpan`, `IAnonymizer` |
+| `shared/messages.ts` | Cross-context messaging + `GuardConfig` (`enabled` only) + rules/reveal messages + storage keys |
+| `core/rules/rules.default.yaml` | Bundled, DPO-readable default rules (imported via Vite `?raw`) |
+| `core/rules/{types,schema,parse,compile,engine,defaults}.ts` | YAML rule model → validate → compile to regex matchers → `evaluate(text)` |
+| `core/match.ts` | Generic `resolveOverlaps()` — collapses overlapping spans into one non-overlapping set |
+| `core/validators.ts` | Luhn / IPv4 / JWT / reserved-email validators (used by built-in matchers) |
+| `core/anonymizer.ts` | `Anonymizer`: `anonymizeSpans()` (reversible `[LABEL_xxxx]`), `deanonymize()`, `exportMap()` |
+| `adapters/*.ts` | Per-service request shapers + optional `conversationSelector` (reveal scope), implementing `LLMAdapter` |
+| `content/main-world.ts` | MAIN world: patches `window.fetch`, runs `evaluate()`, anonymizes anonymize-action spans, handles reveal |
+| `content/reveal.ts` | MAIN world: in-page reveal/hide of real values (TreeWalker, marker spans, React-safe) |
+| `content/bridge.ts` | ISOLATED world: relays config + rules + reveal commands and detection events |
+| `background/service-worker.ts` | Stores logs/stats, seeds + validates + serves rules YAML, updates the toolbar badge |
 | `ui/banner.ts` | In-page toast (createElement/textContent only) |
-| `popup/`, `options/` | Popup dashboard + options page (mode, stats, activity) |
+| `popup/` | Popup: enable switch, **Reveal/Hide** button, stats, activity |
+| `options/` | Options: enable switch + **DPO YAML rules editor** (load/validate/save/reset) |
 
-**Detection pipeline:** Layer-1 regex (overlap-resolved) + Layer-1.5 keyword matching → anonymize / warn / block. The heavier v2 layers (fuzzy, contextual, LLM classifier) and telemetry were intentionally dropped to keep v3 lean and fast.
+**Detection pipeline:** `evaluate(prompt, rules)` runs built-in validated matchers + the DPO's `words`/`regex`/`combination` rules, drops whitelist spans, resolves overlaps, and returns findings + a **decision = most severe action** (`block > anonymize > warn`). Rules are authoritative — there is no global mode.
 
-**Adding an LLM:** add an adapter in `extension/src/adapters/` (implement `LLMAdapter`), register it in `adapters/index.ts`, and add the hostname globs to `extension/manifest.config.ts`.
+**Rules:** stored as a YAML string in `chrome.storage.sync` (`guard_rules_yaml`); the bundled default seeds it on install. The service worker validates size + syntax on save; the bridge pushes the YAML to the MAIN world, which compiles and evaluates.
+
+**Adding an LLM:** add an adapter in `extension/src/adapters/` (implement `LLMAdapter`, optionally set `conversationSelector`), register it in `adapters/index.ts`, and add the hostname globs to `extension/manifest.config.ts`.
+
+**Editing detection rules:** change `extension/src/core/rules/rules.default.yaml` (the bundled default) or, at runtime, the Options-page YAML editor.
 
 ---
 

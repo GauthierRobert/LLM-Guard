@@ -5,7 +5,9 @@
 import type {
   DetectionEvent,
   GuardConfig,
+  RevealResponse,
   RuntimeMessage,
+  SetRulesResponse,
 } from "@/shared/messages";
 
 /** Shape of one day's aggregate counters returned by `get-stats`. */
@@ -56,6 +58,41 @@ export function getLogs(): Promise<DetectionEvent[]> {
 
 export function clearLogs(): Promise<{ ok: true }> {
   return send<{ ok: true }>({ kind: "clear-logs" });
+}
+
+export function getRules(): Promise<{ yaml: string }> {
+  return send<{ yaml: string }>({ kind: "get-rules" });
+}
+
+export function setRules(yaml: string): Promise<SetRulesResponse> {
+  return send<SetRulesResponse>({ kind: "set-rules", payload: { yaml } });
+}
+
+export function resetRules(): Promise<{ ok: true; yaml: string }> {
+  return send<{ ok: true; yaml: string }>({ kind: "reset-rules" });
+}
+
+/**
+ * Send a reveal/hide command to the active tab's content script. Resolves with
+ * the result, or a not-ok result when the tab is not a supported LLM page.
+ */
+export function sendReveal(reveal: boolean): Promise<RevealResponse> {
+  return new Promise<RevealResponse>((resolve) => {
+    chrome.tabs.query({ active: true, currentWindow: true }, (tabs) => {
+      const tabId = tabs[0]?.id;
+      if (tabId === undefined) {
+        resolve({ ok: false, reveal: false, replaced: 0 });
+        return;
+      }
+      chrome.tabs.sendMessage(tabId, { kind: "reveal", reveal }, (response: RevealResponse) => {
+        if (chrome.runtime.lastError || !response) {
+          resolve({ ok: false, reveal: false, replaced: 0 });
+          return;
+        }
+        resolve(response);
+      });
+    });
+  });
 }
 
 /** Local date key (YYYY-MM-DD) used to index the per-day stats bucket. */

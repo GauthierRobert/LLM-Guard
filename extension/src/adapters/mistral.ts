@@ -9,6 +9,7 @@ export const mistralAdapter: LLMAdapter = {
   id: "mistral",
   label: "Mistral",
   hostnames: ["chat.mistral.ai"],
+  conversationSelector: "main",
 
   matchEndpoint(url: string): boolean {
     return /\/api\/(chat|conversation|completion)/i.test(url);

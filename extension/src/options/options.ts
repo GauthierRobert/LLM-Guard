@@ -1,14 +1,18 @@
 /**
- * Options page: master enable toggle, mode radios with descriptions, the static
- * list of supported services, and a "clear activity & stats" action. All DOM is
- * built with createElement + textContent (services list); the rest is static
- * HTML wired up here.
+ * Options page: master enable toggle, the DPO rules editor (load / save /
+ * validate / reset), the static list of supported services, and a "clear
+ * activity & stats" action. All DOM is built with createElement + textContent.
  */
-import type { GuardConfig, GuardMode } from "@/shared/messages";
+import type { GuardConfig } from "@/shared/messages";
 import { DEFAULT_CONFIG } from "@/shared/messages";
-import { clearLogs, getConfig, setConfig } from "@/popup/messaging";
-
-const MODES: readonly GuardMode[] = ["anonymize", "warn", "block"];
+import {
+  clearLogs,
+  getConfig,
+  getRules,
+  resetRules,
+  setConfig,
+  setRules,
+} from "@/popup/messaging";
 
 const SERVICES: readonly string[] = [
   "ChatGPT",
@@ -31,12 +35,6 @@ function byId<T extends HTMLElement>(id: string): T {
 
 function reflectConfig(): void {
   byId<HTMLInputElement>("enabled").checked = config.enabled;
-  for (const input of document.querySelectorAll<HTMLInputElement>(
-    'input[name="mode"]',
-  )) {
-    input.checked = input.value === config.mode;
-    input.disabled = !config.enabled;
-  }
 }
 
 function renderServices(): void {
@@ -77,6 +75,28 @@ function showToast(message: string): void {
   }, 2400);
 }
 
+function showRuleErrors(errors: string[]): void {
+  const box = byId<HTMLDivElement>("rules-errors");
+  box.replaceChildren();
+  if (errors.length === 0) {
+    box.classList.remove("visible");
+    return;
+  }
+  const ul = document.createElement("ul");
+  for (const e of errors) {
+    const li = document.createElement("li");
+    li.textContent = e;
+    ul.append(li);
+  }
+  box.append(ul);
+  box.classList.add("visible");
+}
+
+async function loadRules(): Promise<void> {
+  const { yaml } = await getRules().catch(() => ({ yaml: "" }));
+  byId<HTMLTextAreaElement>("rules-yaml").value = yaml;
+}
+
 async function persistConfig(): Promise<void> {
   await setConfig(config).catch(() => undefined);
   reflectConfig();
@@ -88,16 +108,28 @@ function wireControls(): void {
     void persistConfig();
   });
 
-  for (const input of document.querySelectorAll<HTMLInputElement>(
-    'input[name="mode"]',
-  )) {
-    input.addEventListener("change", () => {
-      const value = input.value as GuardMode;
-      if (!MODES.includes(value)) return;
-      config = { ...config, mode: value };
-      void persistConfig();
+  byId<HTMLButtonElement>("rules-save").addEventListener("click", () => {
+    const yaml = byId<HTMLTextAreaElement>("rules-yaml").value;
+    void setRules(yaml).then((res) => {
+      if (res.ok) {
+        showRuleErrors([]);
+        showToast("Rules saved.");
+      } else {
+        showRuleErrors(res.errors);
+        showToast("Rules not saved — please fix the errors.");
+      }
     });
-  }
+  });
+
+  byId<HTMLButtonElement>("rules-reset").addEventListener("click", () => {
+    const ok = window.confirm("Replace the current rules with the built-in defaults?");
+    if (!ok) return;
+    void resetRules().then((res) => {
+      byId<HTMLTextAreaElement>("rules-yaml").value = res.yaml;
+      showRuleErrors([]);
+      showToast("Rules reset to default.");
+    });
+  });
 
   byId<HTMLButtonElement>("clear").addEventListener("click", () => {
     const ok = window.confirm(
@@ -105,9 +137,21 @@ function wireControls(): void {
     );
     if (!ok) return;
     clearLogs()
-      .then(() => showToast("Activity cleared."))
-      .catch(() => showToast("Could not clear activity."));
+      .then(() => showActivityToast("Activity cleared."))
+      .catch(() => showActivityToast("Could not clear activity."));
   });
+}
+
+let activityToastTimer: number | undefined;
+function showActivityToast(message: string): void {
+  const toast = byId("toast-activity");
+  toast.textContent = message;
+  toast.classList.add("toast-visible");
+  if (activityToastTimer !== undefined) clearTimeout(activityToastTimer);
+  activityToastTimer = window.setTimeout(() => {
+    toast.classList.remove("toast-visible");
+    toast.textContent = "";
+  }, 2400);
 }
 
 async function init(): Promise<void> {
@@ -116,6 +160,7 @@ async function init(): Promise<void> {
   renderVersion();
   config = await getConfig().catch(() => ({ ...DEFAULT_CONFIG }));
   reflectConfig();
+  await loadRules();
 }
 
 document.addEventListener("DOMContentLoaded", () => void init());

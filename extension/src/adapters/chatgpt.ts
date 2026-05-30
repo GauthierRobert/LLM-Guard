@@ -22,6 +22,7 @@ export const chatgptAdapter: LLMAdapter = {
   id: "chatgpt",
   label: "ChatGPT",
   hostnames: ["chatgpt.com", "chat.openai.com"],
+  conversationSelector: "[data-message-author-role], main",
 
   matchEndpoint(url: string): boolean {
     return url.includes("/conversation");

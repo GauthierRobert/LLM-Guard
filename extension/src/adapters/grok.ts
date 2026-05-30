@@ -9,6 +9,7 @@ export const grokAdapter: LLMAdapter = {
   id: "grok",
   label: "Grok",
   hostnames: ["grok.com", "x.ai"],
+  conversationSelector: "main",
 
   matchEndpoint(url: string): boolean {
     return (

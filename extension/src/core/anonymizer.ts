@@ -1,11 +1,4 @@
-import {
-  type AnonymizeResult,
-  type Finding,
-  type IAnonymizer,
-  type StreamDeanonymizer,
-} from "@/shared/types";
-import { collectMatches } from "./match";
-import { scanKeywords } from "./keywords";
+import { type AnonymizeSpan, type IAnonymizer } from "@/shared/types";
 
 const FNV_OFFSET = 0x811c9dc5;
 const FNV_PRIME = 0x01000193;
@@ -21,9 +14,10 @@ function fnv1a6(input: string): string {
 }
 
 /**
- * Reversible, session-scoped anonymizer. Replaces PII spans with stable
- * `[TYPE_xxxx]` placeholders and can restore them — including across streamed
- * response chunks.
+ * Reversible, session-scoped anonymizer. Replaces caller-provided spans with
+ * stable `[LABEL_xxxx]` placeholders and retains a placeholder→value map so the
+ * real values can be restored on demand (manual reveal). The same value always
+ * maps to the same placeholder within a session.
  */
 export class Anonymizer implements IAnonymizer {
   private readonly maxMapSize: number;
@@ -40,39 +34,25 @@ export class Anonymizer implements IAnonymizer {
     return this.fwd.size;
   }
 
-  anonymize(text: string): AnonymizeResult {
-    const matches = collectMatches(text);
-    const findings: Finding[] = [];
-    const map: Record<string, string> = {};
-
-    // Rebuild the string by walking the non-overlapping spans left to right.
+  anonymizeSpans(text: string, spans: AnonymizeSpan[]): string {
+    if (spans.length === 0) return text;
+    // Walk spans left-to-right; they are expected non-overlapping and may be
+    // in any order, so sort defensively.
+    const ordered = [...spans].sort((a, b) => a.start - b.start);
     let out = "";
     let cursor = 0;
-    for (const m of matches) {
-      let placeholder = this.rev.get(m.value);
+    for (const span of ordered) {
+      if (span.start < cursor) continue; // skip accidental overlaps
+      let placeholder = this.rev.get(span.value);
       if (!placeholder) {
-        placeholder = this.mint(m.pattern.type, m.value);
-        this.store(placeholder, m.value);
+        placeholder = this.mint(span.label, span.value);
+        this.store(placeholder, span.value);
       }
-      out += text.slice(cursor, m.start) + placeholder;
-      cursor = m.end;
-      map[placeholder] = m.value;
-      findings.push({
-        type: m.pattern.type,
-        label: m.pattern.label,
-        value: m.value,
-        severity: m.pattern.severity,
-        start: m.start,
-        end: m.end,
-        source: "regex",
-      });
+      out += text.slice(cursor, span.start) + placeholder;
+      cursor = span.end;
     }
     out += text.slice(cursor);
-
-    // Keywords are reported but not replaced (no reversible placeholder).
-    for (const kf of scanKeywords(text)) findings.push(kf);
-
-    return { text: out, findings, map, changed: matches.length > 0 };
+    return out;
   }
 
   deanonymize(text: string): string {
@@ -85,29 +65,8 @@ export class Anonymizer implements IAnonymizer {
     return out;
   }
 
-  createStreamDeanonymizer(): StreamDeanonymizer {
-    let carry = "";
-    const deanon = (s: string) => this.deanonymize(s);
-    return {
-      push(chunk: string): string {
-        carry += chunk;
-        // Hold back from the last unterminated '[' so a placeholder is never
-        // split across emitted chunks.
-        const lastOpen = carry.lastIndexOf("[");
-        let cut = carry.length;
-        if (lastOpen !== -1 && carry.indexOf("]", lastOpen) === -1) {
-          cut = lastOpen;
-        }
-        const emit = carry.slice(0, cut);
-        carry = carry.slice(cut);
-        return deanon(emit);
-      },
-      flush(): string {
-        const out = deanon(carry);
-        carry = "";
-        return out;
-      },
-    };
+  exportMap(): Record<string, string> {
+    return Object.fromEntries(this.fwd);
   }
 
   reset(): void {
@@ -115,12 +74,12 @@ export class Anonymizer implements IAnonymizer {
     this.rev.clear();
   }
 
-  private mint(type: string, value: string): string {
+  private mint(label: string, value: string): string {
     const base = fnv1a6(this.salt + ":" + value);
-    let placeholder = `[${type}_${base}]`;
+    let placeholder = `[${label}_${base}]`;
     let n = 2;
     while (this.fwd.has(placeholder) && this.fwd.get(placeholder) !== value) {
-      placeholder = `[${type}_${base}_${n}]`;
+      placeholder = `[${label}_${base}_${n}]`;
       n++;
     }
     return placeholder;

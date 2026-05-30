@@ -11,12 +11,17 @@ import {
   DEFAULT_CONFIG,
   LOG_STORAGE_KEY,
   MAX_LOG_ENTRIES,
+  RULES_STORAGE_KEY,
+  RULES_SYNC_MAX_BYTES,
   STATS_STORAGE_KEY,
   type DetectionAction,
   type DetectionEvent,
   type GuardConfig,
   type RuntimeMessage,
+  type SetRulesResponse,
 } from "@/shared/messages";
+import { DEFAULT_RULES_YAML } from "@/core/rules/defaults";
+import { parseRulesYaml } from "@/core/rules/parse";
 
 const BADGE_RED = "#dc2626";
 const BADGE_BLUE = "#2563eb";
@@ -50,6 +55,32 @@ function todayKey(ts: number): string {
 async function getConfig(): Promise<GuardConfig> {
   const stored = await chrome.storage.sync.get(CONFIG_STORAGE_KEY);
   return (stored[CONFIG_STORAGE_KEY] as GuardConfig | undefined) ?? DEFAULT_CONFIG;
+}
+
+async function getRulesYaml(): Promise<string> {
+  const stored = await chrome.storage.sync.get(RULES_STORAGE_KEY);
+  return (stored[RULES_STORAGE_KEY] as string | undefined) ?? DEFAULT_RULES_YAML;
+}
+
+/** Validate size + syntax, then persist the rules YAML. */
+async function setRulesYaml(yaml: string): Promise<SetRulesResponse> {
+  const bytes = new Blob([yaml]).size;
+  if (bytes > RULES_SYNC_MAX_BYTES) {
+    return {
+      ok: false,
+      errors: [
+        `Rules are too large to sync (${bytes} bytes; limit ${RULES_SYNC_MAX_BYTES}). Trim them or remove comments.`,
+      ],
+    };
+  }
+  const parsed = parseRulesYaml(yaml);
+  if (!parsed.ok) return { ok: false, errors: parsed.errors };
+  try {
+    await chrome.storage.sync.set({ [RULES_STORAGE_KEY]: yaml });
+    return { ok: true };
+  } catch (err) {
+    return { ok: false, errors: [`Could not save: ${(err as Error).message}`] };
+  }
 }
 
 async function getLogs(): Promise<DetectionEvent[]> {
@@ -109,9 +140,12 @@ async function recordDetection(event: DetectionEvent): Promise<void> {
 
 chrome.runtime.onInstalled.addListener(() => {
   void (async () => {
-    const stored = await chrome.storage.sync.get(CONFIG_STORAGE_KEY);
+    const stored = await chrome.storage.sync.get([CONFIG_STORAGE_KEY, RULES_STORAGE_KEY]);
     if (stored[CONFIG_STORAGE_KEY] === undefined) {
       await chrome.storage.sync.set({ [CONFIG_STORAGE_KEY]: DEFAULT_CONFIG });
+    }
+    if (stored[RULES_STORAGE_KEY] === undefined) {
+      await chrome.storage.sync.set({ [RULES_STORAGE_KEY]: DEFAULT_RULES_YAML });
     }
     chrome.alarms.create(RESET_ALARM, { periodInMinutes: 24 * 60 });
   })();
@@ -139,6 +173,20 @@ chrome.runtime.onMessage.addListener(
         void chrome.storage.sync
           .set({ [CONFIG_STORAGE_KEY]: message.payload })
           .then(() => sendResponse({ ok: true }));
+        return true;
+
+      case "get-rules":
+        void getRulesYaml().then((yaml) => sendResponse({ yaml }));
+        return true;
+
+      case "set-rules":
+        void setRulesYaml(message.payload.yaml).then(sendResponse);
+        return true;
+
+      case "reset-rules":
+        void chrome.storage.sync
+          .set({ [RULES_STORAGE_KEY]: DEFAULT_RULES_YAML })
+          .then(() => sendResponse({ ok: true, yaml: DEFAULT_RULES_YAML }));
         return true;
 
       case "get-stats":

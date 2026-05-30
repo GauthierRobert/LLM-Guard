@@ -1,12 +1,11 @@
 /**
- * Popup dashboard: master switch, mode segmented control, today's stats and a
+ * Popup dashboard: master switch, manual reveal button, today's stats and a
  * short recent-activity feed. All DOM is built with createElement + textContent.
  */
 import type {
   DetectionAction,
   DetectionEvent,
   GuardConfig,
-  GuardMode,
 } from "@/shared/messages";
 import { DEFAULT_CONFIG } from "@/shared/messages";
 import {
@@ -14,10 +13,9 @@ import {
   getConfig,
   getLogs,
   getStats,
+  sendReveal,
   setConfig,
 } from "@/popup/messaging";
-
-const MODES: readonly GuardMode[] = ["anonymize", "warn", "block"];
 
 const ACTION_LABEL: Record<DetectionAction, string> = {
   anonymized: "Anonymized",
@@ -27,6 +25,7 @@ const ACTION_LABEL: Record<DetectionAction, string> = {
 };
 
 let config: GuardConfig = { ...DEFAULT_CONFIG };
+let revealed = false;
 
 function byId<T extends HTMLElement>(id: string): T {
   const el = document.getElementById(id);
@@ -53,12 +52,12 @@ function prettyService(service: string): string {
 
 function reflectConfig(): void {
   byId<HTMLInputElement>("enabled").checked = config.enabled;
-  for (const input of document.querySelectorAll<HTMLInputElement>(
-    'input[name="mode"]',
-  )) {
-    input.checked = input.value === config.mode;
-    input.disabled = !config.enabled;
-  }
+}
+
+function reflectReveal(): void {
+  const btn = byId<HTMLButtonElement>("reveal-toggle");
+  btn.textContent = revealed ? "Hide real values" : "Reveal real values";
+  btn.classList.toggle("is-revealed", revealed);
 }
 
 async function loadStats(): Promise<void> {
@@ -137,16 +136,26 @@ function wireControls(): void {
     void persistAndRefresh();
   });
 
-  for (const input of document.querySelectorAll<HTMLInputElement>(
-    'input[name="mode"]',
-  )) {
-    input.addEventListener("change", () => {
-      const value = input.value as GuardMode;
-      if (!MODES.includes(value)) return;
-      config = { ...config, mode: value };
-      void persistAndRefresh();
-    });
-  }
+  const revealBtn = byId<HTMLButtonElement>("reveal-toggle");
+  const hint = byId<HTMLParagraphElement>("reveal-hint");
+  revealBtn.addEventListener("click", () => {
+    revealBtn.disabled = true;
+    void sendReveal(!revealed)
+      .then((res) => {
+        if (!res.ok) {
+          hint.textContent = "Open a supported AI chat tab to reveal values.";
+          return;
+        }
+        revealed = res.reveal;
+        reflectReveal();
+        hint.textContent = revealed
+          ? `Showing ${res.replaced} real value${res.replaced === 1 ? "" : "s"} in the page.`
+          : "Behavior is set by your organization's rules.";
+      })
+      .finally(() => {
+        revealBtn.disabled = false;
+      });
+  });
 
   byId<HTMLButtonElement>("open-options").addEventListener("click", () => {
     chrome.runtime.openOptionsPage();
@@ -157,6 +166,7 @@ async function init(): Promise<void> {
   wireControls();
   config = await getConfig().catch(() => ({ ...DEFAULT_CONFIG }));
   reflectConfig();
+  reflectReveal();
   await Promise.all([loadStats(), loadActivity()]);
 }
 

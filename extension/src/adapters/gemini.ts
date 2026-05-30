@@ -5,6 +5,7 @@ export const geminiAdapter: LLMAdapter = {
   id: "gemini",
   label: "Gemini",
   hostnames: ["gemini.google.com"],
+  conversationSelector: "message-content, .conversation-container, main",
 
   matchEndpoint(url: string): boolean {
     return (

@@ -9,6 +9,7 @@ export const deepseekAdapter: LLMAdapter = {
   id: "deepseek",
   label: "DeepSeek",
   hostnames: ["chat.deepseek.com"],
+  conversationSelector: "main",
 
   matchEndpoint(url: string): boolean {
     return (

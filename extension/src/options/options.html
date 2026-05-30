@@ -52,40 +52,40 @@
           </label>
         </div>
 
-        <fieldset class="modes" aria-label="Protection mode">
-          <legend class="sr-only">Protection mode</legend>
+        <p class="note">
+          What happens to detected data — anonymize, warn or block — is decided
+          by the detection rules below, not a global mode.
+        </p>
+      </section>
 
-          <label class="mode-option">
-            <input type="radio" name="mode" value="anonymize" />
-            <span class="mode-text">
-              <span class="mode-name">Anonymize</span>
-              <span class="mode-desc"
-                >Replace sensitive values with [TYPE] placeholders and restore
-                them in responses</span
-              >
-            </span>
-          </label>
-
-          <label class="mode-option">
-            <input type="radio" name="mode" value="warn" />
-            <span class="mode-text">
-              <span class="mode-name">Warn</span>
-              <span class="mode-desc"
-                >Notify but send the prompt unchanged</span
-              >
-            </span>
-          </label>
-
-          <label class="mode-option">
-            <input type="radio" name="mode" value="block" />
-            <span class="mode-text">
-              <span class="mode-name">Block</span>
-              <span class="mode-desc"
-                >Refuse to send prompts containing high-risk data</span
-              >
-            </span>
-          </label>
-        </fieldset>
+      <!-- Detection rules (DPO) -->
+      <section class="card">
+        <h2 class="card-title">Detection rules</h2>
+        <p class="note">
+          Edited by your Data Protection Officer. Each rule defines what to look
+          for (words, a pattern, or a combination) and what to do
+          (<strong>anonymize</strong>, <strong>warn</strong> or
+          <strong>block</strong>). Saved to your browser's synced storage.
+        </p>
+        <textarea
+          id="rules-yaml"
+          class="rules-editor"
+          spellcheck="false"
+          autocomplete="off"
+          autocapitalize="off"
+          rows="22"
+          aria-label="Detection rules (YAML)"
+        ></textarea>
+        <div id="rules-errors" class="rules-errors" role="alert"></div>
+        <div class="row">
+          <button type="button" id="rules-save" class="btn btn-primary">
+            Save rules
+          </button>
+          <button type="button" id="rules-reset" class="btn">
+            Reset to default
+          </button>
+          <span id="toast" class="toast" role="status" aria-live="polite"></span>
+        </div>
       </section>
 
       <!-- Supported services -->
@@ -105,7 +105,7 @@
           <button type="button" id="clear" class="btn btn-danger">
             Clear activity &amp; stats
           </button>
-          <span id="toast" class="toast" role="status" aria-live="polite"></span>
+          <span id="toast-activity" class="toast" role="status" aria-live="polite"></span>
         </div>
       </section>
 

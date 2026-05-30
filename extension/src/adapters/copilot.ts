@@ -9,6 +9,7 @@ export const copilotAdapter: LLMAdapter = {
   id: "copilot",
   label: "Copilot",
   hostnames: ["copilot.microsoft.com"],
+  conversationSelector: "[data-content='message'], main",
 
   matchEndpoint(url: string): boolean {
     return url.includes("/api/conversation") || url.includes("/sydney");

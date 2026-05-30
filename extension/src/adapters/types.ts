@@ -15,6 +15,13 @@ export interface LLMAdapter {
   label: string;
   /** Hostnames this adapter owns (exact `location.hostname` values). */
   hostnames: string[];
+  /**
+   * Optional CSS selector scoping the manual "reveal" to the conversation
+   * area (assistant/user message bubbles). Falls back to document.body when
+   * absent or it matches nothing. Keep it broad enough to cover messages but
+   * narrow enough to avoid the composer/sidebar.
+   */
+  conversationSelector?: string;
   /** True if `url` (request URL or path) is a chat/completion endpoint. */
   matchEndpoint(url: string): boolean;
   /**

@@ -21,71 +21,28 @@ export function maxSeverity(a: Severity | null, b: Severity | null): Severity | 
   return SEVERITY_RANK[a] >= SEVERITY_RANK[b] ? a : b;
 }
 
-/**
- * A single PII detection rule (Layer 1, regex based).
- * `regex` MUST carry the global flag so the engine can iterate all matches.
- */
-export interface PIIPattern {
-  /** Stable machine id, used in placeholders, e.g. "EMAIL". */
-  type: string;
-  /** Human-friendly label, e.g. "Email". */
-  label: string;
-  /** Global regex. */
-  regex: RegExp;
-  severity: Severity;
-  /**
-   * Optional validator run on each raw match. Return false to reject the
-   * match (e.g. Luhn check for cards, RFC-2606 reserved emails).
-   */
-  validate?: (match: string) => boolean;
-}
-
-/** One concrete piece of detected sensitive data. */
-export interface Finding {
-  /** Pattern/category type, e.g. "EMAIL", "KEYWORD". */
-  type: string;
-  /** Human label of the rule that fired. */
-  label: string;
-  /** The matched substring (the sensitive value itself). */
+/** A span the caller wants replaced with a reversible placeholder. */
+export interface AnonymizeSpan {
+  start: number;
+  end: number;
+  /** The sensitive value occupying [start, end). */
   value: string;
-  severity: Severity;
-  /** Where it matched, if known. */
-  start?: number;
-  end?: number;
-  source: "regex" | "keyword";
-}
-
-/** Result of scanning text without mutating it. */
-export interface ScanResult {
-  findings: Finding[];
-  maxSeverity: Severity | null;
-  hasCritical: boolean;
-}
-
-/** Result of anonymizing text. */
-export interface AnonymizeResult {
-  /** Text with sensitive values replaced by `[TYPE_xxxx]` placeholders. */
-  text: string;
-  findings: Finding[];
-  /** Placeholder → original value, for this call (subset of session map). */
-  map: Record<string, string>;
-  /** True when at least one replacement happened. */
-  changed: boolean;
-}
-
-/** Streaming de-anonymizer that is safe across chunk boundaries. */
-export interface StreamDeanonymizer {
-  /** Feed a chunk; returns text safe to emit now (may hold back a tail). */
-  push(chunk: string): string;
-  /** Flush any held-back tail at end of stream. */
-  flush(): string;
+  /** Placeholder label, e.g. "EMAIL" → `[EMAIL_xxxx]`. */
+  label: string;
 }
 
 /** The reversible anonymization engine (session-scoped). */
 export interface IAnonymizer {
-  anonymize(text: string): AnonymizeResult;
+  /**
+   * Replace the given non-overlapping spans with stable `[LABEL_xxxx]`
+   * placeholders and return the rewritten text. The placeholder→value map is
+   * retained so values can be restored on demand.
+   */
+  anonymizeSpans(text: string, spans: AnonymizeSpan[]): string;
+  /** Restore every known placeholder in `text` back to its original value. */
   deanonymize(text: string): string;
-  createStreamDeanonymizer(): StreamDeanonymizer;
+  /** Snapshot of placeholder → original value (for the manual reveal feature). */
+  exportMap(): Record<string, string>;
   /** Current placeholder→original map size (for tests/diagnostics). */
   readonly size: number;
   reset(): void;

@@ -2,15 +2,27 @@
  * MAIN-world content script (document_start).
  *
  * Monkey-patches window.fetch to intercept LLM chat/completion requests and,
- * depending on the configured mode, anonymize / block / warn on detected PII.
- * This sits on the hot path of every fetch, so we early-exit as cheaply as
- * possible and wrap everything in try/catch — the page must never break.
+ * according to the DPO's YAML rules, anonymize / block / warn on detected
+ * sensitive data. Each rule carries its own action; the per-request decision is
+ * the most severe action among the matches (block > anonymize > warn).
+ *
+ * Anonymization is reversible but de-anonymization is MANUAL: the response is
+ * left with placeholders, and the popup's reveal button restores the real
+ * values in the page on demand. This sits on the hot path of every fetch, so we
+ * early-exit cheaply and wrap everything in try/catch — the page must never
+ * break.
  */
 
 import { Anonymizer } from "@/core/anonymizer";
-import { scan } from "@/core/detector";
+import { evaluate } from "@/core/rules/engine";
+import { compileRules } from "@/core/rules/compile";
+import { parseRulesYaml } from "@/core/rules/parse";
+import { getDefaultCompiledRules } from "@/core/rules/defaults";
+import type { CompiledRules, RuleFinding } from "@/core/rules/types";
 import { findAdapter } from "@/adapters";
+import type { LLMAdapter } from "@/adapters/types";
 import { showBanner } from "@/ui/banner";
+import { hideInPage, isRevealed, revealInPage } from "@/content/reveal";
 import {
   DEFAULT_CONFIG,
   GUARD_NS,
@@ -20,26 +32,64 @@ import {
   type FindingSummary,
   type GuardConfig,
 } from "@/shared/messages";
-import { SEVERITY_RANK, type Finding, type Severity } from "@/shared/types";
+import { SEVERITY_RANK, type AnonymizeSpan, type Severity } from "@/shared/types";
 
 const originalFetch = window.fetch.bind(window);
 (window as unknown as { __llmGuardOriginalFetch?: typeof fetch }).__llmGuardOriginalFetch =
   originalFetch;
 
 let config: GuardConfig = DEFAULT_CONFIG;
+let rules: CompiledRules = getDefaultCompiledRules();
 const anonymizer = new Anonymizer();
+const adapter: LLMAdapter | null = findAdapter(location.hostname);
 
 /* ----------------------------- config wiring ----------------------------- */
 
 window.addEventListener("message", (event: MessageEvent) => {
   if (event.source !== window) return;
   if (!isGuardMessage(event.data)) return;
-  if (event.data.kind === "config") {
-    config = event.data.payload;
+  const data = event.data;
+
+  if (data.kind === "config") {
+    config = data.payload;
+  } else if (data.kind === "rules") {
+    applyRules(data.payload.yaml);
+  } else if (data.kind === "reveal") {
+    handleReveal(data.payload.reveal);
   }
 });
 
 window.postMessage({ ns: GUARD_NS, kind: "config-request" }, location.origin);
+
+function applyRules(yaml: string): void {
+  try {
+    const parsed = parseRulesYaml(yaml);
+    if (parsed.ok) rules = compileRules(parsed.doc);
+    // Invalid YAML is rejected at save time; keep the last good rules if it slips through.
+  } catch {
+    /* keep current rules */
+  }
+}
+
+function handleReveal(reveal: boolean): void {
+  let replaced = 0;
+  let ok = true;
+  try {
+    replaced = reveal
+      ? revealInPage(anonymizer.exportMap(), adapter?.conversationSelector ?? null)
+      : hideInPage();
+  } catch {
+    ok = false;
+  }
+  window.postMessage(
+    {
+      ns: GUARD_NS,
+      kind: "reveal-result",
+      payload: { reveal: isRevealed(), replaced, ok },
+    },
+    location.origin,
+  );
+}
 
 /* -------------------------------- helpers -------------------------------- */
 
@@ -50,7 +100,8 @@ function resolveUrl(input: RequestInfo | URL): string {
   return String(input);
 }
 
-function summarize(findings: Finding[]): {
+/** Roll findings up per rule id for the activity log. */
+function summarize(findings: RuleFinding[]): {
   summaries: FindingSummary[];
   highest: Severity;
 } {
@@ -58,14 +109,12 @@ function summarize(findings: Finding[]): {
   let highest: Severity = "low";
   for (const f of findings) {
     if (SEVERITY_RANK[f.severity] > SEVERITY_RANK[highest]) highest = f.severity;
-    const cur = byType.get(f.type);
+    const cur = byType.get(f.ruleId);
     if (cur) {
       cur.count += 1;
-      if (SEVERITY_RANK[f.severity] > SEVERITY_RANK[cur.severity]) {
-        cur.severity = f.severity;
-      }
+      if (SEVERITY_RANK[f.severity] > SEVERITY_RANK[cur.severity]) cur.severity = f.severity;
     } else {
-      byType.set(f.type, { type: f.type, severity: f.severity, count: 1 });
+      byType.set(f.ruleId, { type: f.ruleId, severity: f.severity, count: 1 });
     }
   }
   return { summaries: [...byType.values()], highest };
@@ -80,7 +129,6 @@ function emitDetection(
   const payload: DetectionEvent = {
     service,
     host: location.hostname,
-    mode: config.mode,
     action,
     findings,
     total,
@@ -89,47 +137,35 @@ function emitDetection(
   window.postMessage({ ns: GUARD_NS, kind: "detection", payload }, location.origin);
 }
 
+function blockedResponse(): Response {
+  return new Response(
+    JSON.stringify({ error: "Blocked by LLM Guard — sensitive data detected." }),
+    {
+      status: 403,
+      statusText: "Blocked by LLM Guard",
+      headers: { "content-type": "application/json" },
+    },
+  );
+}
+
 /**
- * Wrap a streamed Response so its text body is de-anonymized on the way back
- * to the page. Returns the original response if the body is not readable.
+ * Find, within a single prompt string, the spans whose value matches an
+ * anonymize-action finding. The engine ran over the joined prompts, so offsets
+ * are recomputed per-prompt by value (stable: same value → same placeholder).
  */
-function deanonymizeResponse(response: Response): Response {
-  const body = response.body;
-  if (!body) return response;
-
-  const reader = body.getReader();
-  const decoder = new TextDecoder();
-  const encoder = new TextEncoder();
-  const stream = anonymizer.createStreamDeanonymizer();
-
-  const out = new ReadableStream<Uint8Array>({
-    async pull(controller) {
-      try {
-        const { done, value } = await reader.read();
-        if (done) {
-          const decoded = decoder.decode();
-          const tail = stream.push(decoded) + stream.flush();
-          if (tail) controller.enqueue(encoder.encode(tail));
-          controller.close();
-          return;
-        }
-        const text = decoder.decode(value, { stream: true });
-        const emitted = stream.push(text);
-        if (emitted) controller.enqueue(encoder.encode(emitted));
-      } catch (err) {
-        controller.error(err);
-      }
-    },
-    cancel(reason) {
-      void reader.cancel(reason);
-    },
-  });
-
-  return new Response(out, {
-    status: response.status,
-    statusText: response.statusText,
-    headers: response.headers,
-  });
+function anonymizeSpansFor(text: string, findings: RuleFinding[]): AnonymizeSpan[] {
+  const spans: AnonymizeSpan[] = [];
+  for (const f of findings) {
+    if (f.action !== "anonymize") continue;
+    let from = 0;
+    let idx: number;
+    while ((idx = text.indexOf(f.value, from)) !== -1) {
+      spans.push({ start: idx, end: idx + f.value.length, value: f.value, label: f.placeholderLabel ?? "INFO" });
+      from = idx + f.value.length;
+    }
+  }
+  // Non-overlapping, left-to-right (anonymizer also guards overlaps defensively).
+  return spans.sort((a, b) => a.start - b.start);
 }
 
 /* ------------------------------ fetch patch ------------------------------ */
@@ -139,16 +175,12 @@ window.fetch = async function patchedFetch(
   init?: RequestInit,
 ): Promise<Response> {
   try {
-    // Cheap early-exits first.
     if (!config.enabled) return originalFetch(input, init);
-
-    const adapter = findAdapter(location.hostname);
     if (!adapter) return originalFetch(input, init);
 
     const url = resolveUrl(input);
     if (!adapter.matchEndpoint(url)) return originalFetch(input, init);
 
-    // Read the request body text.
     let bodyText: string | null = null;
     if (typeof init?.body === "string") {
       bodyText = init.body;
@@ -165,61 +197,51 @@ window.fetch = async function patchedFetch(
     } catch {
       return originalFetch(input, init);
     }
-    if (typeof parsed !== "object" || parsed === null) {
-      return originalFetch(input, init);
-    }
+    if (typeof parsed !== "object" || parsed === null) return originalFetch(input, init);
 
     const prompts = adapter.extractPrompts(parsed);
     if (prompts.length === 0) return originalFetch(input, init);
 
-    const result = scan(prompts.join("\n"));
-    if (result.findings.length === 0) return originalFetch(input, init);
+    const result = evaluate(prompts.join("\n"), rules);
+    if (result.findings.length === 0 || result.decision === null) {
+      return originalFetch(input, init);
+    }
 
     const { summaries, highest } = summarize(result.findings);
     const total = result.findings.length;
 
-    // block mode only short-circuits on high/critical; otherwise anonymize.
-    if (config.mode === "block" && (highest === "high" || highest === "critical")) {
+    if (result.decision === "block") {
       showBanner({ message: "Blocked — sensitive data detected", tone: "danger" });
       emitDetection(adapter.id, "blocked", summaries, total);
-      return new Response(
-        JSON.stringify({ error: "Blocked by LLM Guard — sensitive data detected." }),
-        {
-          status: 403,
-          statusText: "Blocked by LLM Guard",
-          headers: { "content-type": "application/json" },
-        },
-      );
+      return blockedResponse();
     }
 
-    if (config.mode === "warn") {
+    if (result.decision === "warn") {
       showBanner({ message: "Sensitive data detected in your prompt", tone: "warn" });
       emitDetection(adapter.id, "warned", summaries, total);
       return originalFetch(input, init);
     }
 
-    // anonymize (default, and block fallthrough on low/medium).
-    let changed = false;
-    const newBody = adapter.injectPrompts(parsed, (t) => {
-      const a = anonymizer.anonymize(t);
-      if (a.changed) changed = true;
-      return a.text;
-    });
+    // anonymize: replace only the anonymize-action spans; leave the response
+    // untouched (placeholders are revealed manually from the popup).
+    const newBody = adapter.injectPrompts(parsed, (t) =>
+      anonymizer.anonymizeSpans(t, anonymizeSpansFor(t, result.findings)),
+    );
 
     const serialized = JSON.stringify(newBody);
-    let response: Response;
-    if (input instanceof Request) {
-      response = await originalFetch(new Request(input, { body: serialized }));
-    } else {
-      response = await originalFetch(input, { ...init, body: serialized });
-    }
+    const response =
+      input instanceof Request
+        ? await originalFetch(new Request(input, { body: serialized }))
+        : await originalFetch(input, { ...init, body: serialized });
 
-    showBanner({ message: "Sensitive data anonymized", tone: "info" });
+    showBanner({
+      message: "Sensitive data anonymized — reveal from the popup",
+      tone: "info",
+    });
     emitDetection(adapter.id, "anonymized", summaries, total);
-
-    return changed ? deanonymizeResponse(response) : response;
+    void highest;
+    return response;
   } catch {
-    // Any failure → behave exactly like a normal fetch.
     return originalFetch(input, init);
   }
 };

@@ -34,21 +34,14 @@
     </header>
 
     <main>
-      <fieldset class="segmented" aria-label="Protection mode">
-        <legend class="sr-only">Protection mode</legend>
-        <label class="seg">
-          <input type="radio" name="mode" value="anonymize" />
-          <span>Anonymize</span>
-        </label>
-        <label class="seg">
-          <input type="radio" name="mode" value="warn" />
-          <span>Warn</span>
-        </label>
-        <label class="seg">
-          <input type="radio" name="mode" value="block" />
-          <span>Block</span>
-        </label>
-      </fieldset>
+      <section class="reveal" aria-label="Reveal anonymized values">
+        <button type="button" id="reveal-toggle" class="reveal-btn">
+          Reveal real values
+        </button>
+        <p class="reveal-hint" id="reveal-hint">
+          Behavior is set by your organization's rules.
+        </p>
+      </section>
 
       <section class="stats" aria-label="Today's activity">
         <div class="stat-card">
