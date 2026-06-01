@@ -1,0 +1,47 @@
+<svg width="128" height="128" viewBox="0 0 128 128" fill="none" xmlns="http://www.w3.org/2000/svg" role="img" aria-label="LLM Guard">
+  <defs>
+    <!-- Shield body: indigo → violet -->
+    <linearGradient id="shield" x1="24" y1="8" x2="104" y2="120" gradientUnits="userSpaceOnUse">
+      <stop offset="0" stop-color="#6366F1"/>
+      <stop offset="0.55" stop-color="#7C3AED"/>
+      <stop offset="1" stop-color="#5B21B6"/>
+    </linearGradient>
+    <!-- Top glossy highlight -->
+    <linearGradient id="gloss" x1="64" y1="8" x2="64" y2="74" gradientUnits="userSpaceOnUse">
+      <stop offset="0" stop-color="#ffffff" stop-opacity="0.35"/>
+      <stop offset="1" stop-color="#ffffff" stop-opacity="0"/>
+    </linearGradient>
+    <!-- Soft drop shadow -->
+    <filter id="ds" x="-20%" y="-12%" width="140%" height="135%">
+      <feDropShadow dx="0" dy="3" stdDeviation="4" flood-color="#312E81" flood-opacity="0.45"/>
+    </filter>
+  </defs>
+
+  <!-- Shield outline -->
+  <path filter="url(#ds)" d="M64 8 L108 24 V62 C108 92 89 112 64 122 C39 112 20 92 20 62 V24 Z"
+        fill="url(#shield)"/>
+
+  <!-- Inner rim -->
+  <path d="M64 16 L100 29 V62 C100 87 84.5 104.5 64 113.5 C43.5 104.5 28 87 28 62 V29 Z"
+        fill="none" stroke="#ffffff" stroke-opacity="0.22" stroke-width="2.5"/>
+
+  <!-- Gloss on the upper half -->
+  <path d="M64 8 L108 24 V60 C90 50 74 47 64 47 C54 47 38 50 20 60 V24 Z" fill="url(#gloss)"/>
+
+  <!-- Chat bubble (the prompt) -->
+  <g>
+    <rect x="40" y="46" width="48" height="34" rx="9" fill="#ffffff"/>
+    <path d="M55 78 L55 92 L70 78 Z" fill="#ffffff"/>
+  </g>
+
+  <!-- Redaction / anonymization mark: [ ••• ] -->
+  <g stroke="#7C3AED" stroke-width="3.4" stroke-linecap="round" fill="none">
+    <path d="M52 56 H48.5 V70 H52"/>
+    <path d="M76 56 H79.5 V70 H76"/>
+  </g>
+  <g fill="#7C3AED">
+    <circle cx="58.5" cy="63" r="3.1"/>
+    <circle cx="64" cy="63" r="3.1"/>
+    <circle cx="69.5" cy="63" r="3.1"/>
+  </g>
+</svg>

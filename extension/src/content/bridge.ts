@@ -31,7 +31,7 @@ async function readConfig(): Promise<GuardConfig> {
 
 async function readRulesYaml(): Promise<string | null> {
   try {
-    const stored = await chrome.storage.sync.get(RULES_STORAGE_KEY);
+    const stored = await chrome.storage.local.get(RULES_STORAGE_KEY);
     return (stored[RULES_STORAGE_KEY] as string | undefined) ?? null;
   } catch {
     return null;
@@ -112,15 +112,15 @@ chrome.runtime.onMessage.addListener(
 /* --------------------------- storage change feed -------------------------- */
 
 chrome.storage.onChanged.addListener((changes, area) => {
-  if (area !== "sync") return;
-  if (CONFIG_STORAGE_KEY in changes) {
+  // Config lives in sync; rules live in local (too big for sync's per-item cap).
+  if (area === "sync" && CONFIG_STORAGE_KEY in changes) {
     post({
       ns: GUARD_NS,
       kind: "config",
       payload: (changes[CONFIG_STORAGE_KEY]?.newValue as GuardConfig | undefined) ?? DEFAULT_CONFIG,
     });
   }
-  if (RULES_STORAGE_KEY in changes) {
+  if (area === "local" && RULES_STORAGE_KEY in changes) {
     const yaml = changes[RULES_STORAGE_KEY]?.newValue as string | undefined;
     if (typeof yaml === "string") post({ ns: GUARD_NS, kind: "rules", payload: { yaml } });
   }

@@ -30,7 +30,13 @@ export const DEFAULT_CONFIG: GuardConfig = {
 
 /** chrome.storage.sync key holding the GuardConfig. */
 export const CONFIG_STORAGE_KEY = "guard_config" as const;
-/** chrome.storage.sync key holding the DPO rules YAML (a string). */
+/**
+ * chrome.storage.local key holding the DPO rules YAML (a string).
+ *
+ * Stored in `local`, NOT `sync`: chrome.storage.sync caps each item at ~8KB
+ * (QUOTA_BYTES_PER_ITEM) and the bundled default ruleset already exceeds that.
+ * `local` allows multiple MB per item, so the rules can grow freely.
+ */
 export const RULES_STORAGE_KEY = "guard_rules_yaml" as const;
 /** chrome.storage.local key holding the rolling activity log. */
 export const LOG_STORAGE_KEY = "guard_logs" as const;
@@ -39,10 +45,10 @@ export const STATS_STORAGE_KEY = "guard_stats" as const;
 /** Max number of activity-log entries retained by the service worker. */
 export const MAX_LOG_ENTRIES = 500;
 /**
- * Soft cap on the rules YAML size. chrome.storage.sync allows ~8KB per item;
- * we reject earlier with a friendly message and fall back to local storage.
+ * Sanity cap on the rules YAML size. Stored in chrome.storage.local (multi-MB
+ * quota), so this only guards against pathological pastes, not the sync limit.
  */
-export const RULES_SYNC_MAX_BYTES = 8000;
+export const RULES_MAX_BYTES = 256 * 1024;
 
 export type DetectionAction = "anonymized" | "blocked" | "warned" | "clean";
 

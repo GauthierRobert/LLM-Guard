@@ -28,7 +28,8 @@ placeholder→value map lives only in the page's memory for that session.
 
 Rules are authored in YAML — readable by a non-developer. A default rule set is
 bundled; the **Options page** has an editor to paste/edit YAML, which is
-validated (syntax + schema + sync-size) and saved to `chrome.storage.sync`.
+validated (syntax + schema + size) and saved to `chrome.storage.local`
+(the ruleset is larger than `chrome.storage.sync`'s ~8KB per-item cap).
 
 ```yaml
 version: 1
