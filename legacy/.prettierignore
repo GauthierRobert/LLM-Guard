@@ -1,6 +1,0 @@
-vendor/
-dashboard/
-api-java/
-config/company-rules.js
-node_modules/
-*.min.js

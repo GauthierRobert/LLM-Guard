@@ -1,0 +1,45 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <title>Mock LLM</title>
+  </head>
+  <body>
+    <!-- Stands in for a real LLM web app. The content scripts inject here
+         because the test serves this page under a matched host (chatgpt.com).
+         A conversation area so the in-page reveal has something to scope to. -->
+    <main>
+      <div data-message-author-role="user" id="conversation"></div>
+    </main>
+    <script>
+      // Send a prompt the way ChatGPT's web app does: POST JSON to a
+      // /conversation endpoint. The extension's MAIN-world fetch patch sees it,
+      // runs the rules, and (per decision) anonymizes / blocks / passes through.
+      // Returns the parsed JSON the endpoint echoed back, plus the HTTP status,
+      // so the test can assert on the *outgoing* (possibly anonymized) body.
+      window.sendPrompt = async function (text) {
+        const res = await fetch("https://chatgpt.com/backend-api/conversation", {
+          method: "POST",
+          headers: { "content-type": "application/json" },
+          body: JSON.stringify({
+            action: "next",
+            messages: [
+              {
+                author: { role: "user" },
+                content: { content_type: "text", parts: [text] },
+              },
+            ],
+            model: "gpt-test",
+          }),
+        });
+        let body = null;
+        try {
+          body = await res.json();
+        } catch {
+          /* non-JSON (e.g. blocked) */
+        }
+        return { status: res.status, body };
+      };
+    </script>
+  </body>
+</html>

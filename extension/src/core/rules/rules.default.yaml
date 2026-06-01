@@ -1,43 +1,65 @@
 # ============================================================================
-# LLM Guard — detection rules
+# LLM Guard — règles de détection par défaut
 #
-# Edited by the DPO (Data Protection Officer). Saved to your browser's synced
-# storage. Each rule says WHAT to look for and WHAT to do:
+# Édité par le DPO (Délégué à la Protection des Données). Enregistré dans le
+# stockage synchronisé du navigateur. Chaque règle dit QUOI chercher et QUOI
+# faire :
 #
-#   action: anonymize  ->  replace with a placeholder like [EMAIL_a1b2]
-#                          (you can reveal the real values later from the popup)
-#   action: block      ->  refuse to send the prompt at all
-#   action: warn       ->  warn you, but send the prompt unchanged
+#   action: anonymize  ->  remplace par un marqueur comme [EMAIL_a1b2]
+#                          (les vraies valeurs sont révélables depuis le popup)
+#   action: block      ->  refuse purement d'envoyer le prompt
+#   action: warn       ->  prévient, mais envoie le prompt tel quel
 #
-# Rule kinds:
-#   kind: words        ->  exact word/phrase, case-insensitive  (list in "words")
-#   kind: regex        ->  a pattern  (in "pattern")
-#   kind: combination  ->  fires only if ALL the conditions in "all" appear
+# Types de règle :
+#   kind: words        ->  mot/expression exact, insensible à la casse  ("words")
+#   kind: regex        ->  un motif  ("pattern")
+#   kind: combination  ->  ne se déclenche que si TOUTES les conditions de "all"
+#                          apparaissent (ex. un terme + un montant)
 #
-# Built-in checks for credit cards, IBANs, JWTs and IPs run automatically
-# (with maths validation) on top of these rules.
+# Champs par règle :
+#   id           (obligatoire) identifiant unique, lisible
+#   description  (facultatif)  note pour le DPO
+#   action       (facultatif)  sinon -> defaults.action
+#   severity     (facultatif)  low | medium | high | critical ; sinon defaults
+#   placeholder  (facultatif)  étiquette du marqueur, ex. EMAIL -> [EMAIL_xxxx]
+#                              (par défaut dérivée de l'id)
+#
+# Détections intégrées (avec validation mathématique) qui tournent AUTOMATIQUEMENT
+# en plus des règles ci-dessous, inutile de les réécrire :
+#   - Cartes bancaires  (algorithme de Luhn)   -> [CARD_xxxx]
+#   - Jetons JWT                                 -> [JWT_xxxx]
+#   - Adresses IPv4 (validées)                   -> [IP_xxxx]
 # ============================================================================
 version: 1
 
-# Used when a rule does not set its own action / severity.
+# Action / sévérité utilisées quand une règle ne fixe pas les siennes.
 defaults:
   action: anonymize
   severity: medium
 
-# Values here are NEVER flagged, even if a rule below would match them.
+# Valeurs JAMAIS signalées, même si une règle ci-dessous correspond.
+# (ex. adresses de contact publiques, domaines de l'entreprise.)
 whitelist:
   - "support@example.com"
+  - "contact@example.com"
+  - "example.com"
 
-# Values here are ALWAYS flagged with the action below.
+# Valeurs TOUJOURS signalées, avec l'action ci-dessous.
+# Le DPO y met les noms de projets confidentiels, noms de code, etc.
 blacklist:
   action: block
   severity: critical
+  # Décommentez et ajoutez vos noms de projets / codes confidentiels :
   values: []
+    # - "Projet Titan"
+    # - "Opération Aurore"
 
 rules:
-  # ----------------------------- Contact details ----------------------------
+  # ==========================================================================
+  # 1. Coordonnées personnelles
+  # ==========================================================================
   - id: email
-    description: Email addresses
+    description: Adresses e-mail
     kind: regex
     action: anonymize
     severity: high
@@ -45,7 +67,7 @@ rules:
     pattern: "[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\\.[a-zA-Z]{2,}"
 
   - id: phone-fr
-    description: French phone numbers
+    description: Numéros de téléphone français (fixe et mobile)
     kind: regex
     action: anonymize
     severity: high
@@ -53,7 +75,7 @@ rules:
     pattern: "(?:\\+33|0)\\s*[1-9](?:[\\s.-]*\\d{2}){4}"
 
   - id: phone-intl
-    description: International phone numbers
+    description: Numéros de téléphone internationaux (format E.164)
     kind: regex
     action: anonymize
     severity: medium
@@ -61,142 +83,386 @@ rules:
     pattern: "\\+\\d{1,3}[\\s.-]?\\d{4,14}"
 
   - id: address-fr
-    description: French postal addresses
+    description: Adresses postales françaises (numéro + voie)
     kind: regex
     action: anonymize
     severity: high
     placeholder: ADDRESS
-    pattern: "\\d{1,4}\\s+(?:rue|avenue|boulevard|place|impasse|allée|chemin|route)\\s+[\\w\\s-]{3,40}"
+    pattern: "\\d{1,4}(?:\\s?(?:bis|ter))?\\s+(?:rue|avenue|av\\.|boulevard|bd|place|impasse|allée|chemin|route|quai|cours|passage|square)\\s+[\\p{L}\\d\\s'-]{3,40}"
 
-  - id: person-fr
-    description: Names with a French title (M., Mme, Dr…)
+  - id: postal-code-fr
+    description: Code postal français suivi d'une ville
+    kind: regex
+    action: anonymize
+    severity: low
+    placeholder: POSTAL
+    pattern: "\\b\\d{5}\\s+\\p{Lu}[\\p{L}-]{2,}"
+
+  - id: person-title-fr
+    description: Noms précédés d'un titre de civilité (M., Mme, Dr…)
+    # NB : le moteur compile les regex en insensible à la casse, donc on ne peut
+    # pas exiger une majuscule sur le nom — le titre (M., Mme, Dr, Maître…) fait
+    # office de garde. On évite « Me » nu qui matcherait le mot anglais "me".
     kind: regex
     action: anonymize
     severity: high
     placeholder: PERSON
-    pattern: "(?:M\\.|Mme|Mlle|Dr|Pr)\\s+\\p{Lu}\\p{Ll}+(?:\\s+\\p{Lu}\\p{Ll}+){1,2}"
-
-  # --------------------------- National identifiers --------------------------
-  - id: iban
-    description: IBAN bank account numbers
-    kind: regex
-    action: anonymize
-    severity: critical
-    placeholder: IBAN
-    pattern: "[A-Z]{2}\\d{2}\\s?(?:[\\dA-Z]{4}\\s?){2,7}[\\dA-Z]{1,4}"
-
-  - id: nss-fr
-    description: French social security number (NIR)
-    kind: regex
-    action: anonymize
-    severity: critical
-    placeholder: NSS
-    pattern: "[12]\\s?\\d{2}\\s?\\d{2}\\s?\\d{2}\\s?\\d{3}\\s?\\d{3}\\s?\\d{2}"
-
-  - id: ssn-us
-    description: US social security number
-    kind: regex
-    action: anonymize
-    severity: critical
-    placeholder: SSN
-    pattern: "\\d{3}-\\d{2}-\\d{4}"
+    pattern: "(?:M\\.|MM\\.|Mme|Mlle|Dr|Pr|Maître)\\s+\\p{L}[\\p{L}'-]+(?:[\\s-]+\\p{L}[\\p{L}'-]+){0,2}"
 
   - id: dob
-    description: Dates of birth
+    description: Dates de naissance (JJ/MM/AAAA et variantes)
     kind: regex
     action: anonymize
     severity: medium
     placeholder: DOB
     pattern: "(?:0[1-9]|[12]\\d|3[01])[/.-](?:0[1-9]|1[0-2])[/.-](?:19|20)\\d{2}"
 
-  # -------------------------------- Secrets ----------------------------------
-  - id: aws-key
-    description: AWS access key id
+  # ==========================================================================
+  # 2. Identifiants nationaux et bancaires
+  # ==========================================================================
+  - id: iban
+    description: Numéros de compte bancaire IBAN
     kind: regex
-    action: block
+    action: anonymize
     severity: critical
-    placeholder: AWS_KEY
-    pattern: "AKIA[0-9A-Z]{16}"
+    placeholder: IBAN
+    pattern: "\\b[A-Z]{2}\\d{2}\\s?(?:[\\dA-Z]{4}\\s?){2,7}[\\dA-Z]{1,4}\\b"
 
-  - id: github-pat
-    description: GitHub personal access token
+  - id: bic-swift
+    description: Codes BIC / SWIFT (un code de 8 ou 11 caractères est indissociable
+      d'un mot ordinaire en casse insensible — on exige donc un mot-clé de contexte)
+    kind: combination
+    action: anonymize
+    severity: high
+    placeholder: BIC
+    all:
+      - kind: words
+        words: ["BIC", "SWIFT", "code swift", "code bic"]
+      - kind: regex
+        pattern: "\\b[A-Za-z]{6}[A-Za-z0-9]{2}(?:[A-Za-z0-9]{3})?\\b"
+
+  - id: rib-fr
+    description: RIB français (code banque + guichet + compte + clé)
     kind: regex
-    action: block
+    action: anonymize
     severity: critical
-    placeholder: GH_PAT
-    pattern: "gh[pousr]_[A-Za-z0-9]{36,}"
+    placeholder: RIB
+    pattern: "\\b\\d{5}\\s?\\d{5}\\s?[0-9A-Z]{11}\\s?\\d{2}\\b"
 
-  - id: openai-key
-    description: OpenAI API key
+  - id: nss-fr
+    description: Numéro de sécurité sociale français (NIR)
     kind: regex
-    action: block
+    action: anonymize
     severity: critical
-    placeholder: OPENAI_KEY
-    pattern: "sk-(?:proj-)?[A-Za-z0-9_-]{40,}"
+    placeholder: NSS
+    pattern: "\\b[12]\\s?\\d{2}\\s?\\d{2}\\s?(?:\\d{2}|2[AB])\\s?\\d{3}\\s?\\d{3}\\s?\\d{2}\\b"
 
-  - id: google-key
-    description: Google API key
+  - id: ssn-us
+    description: Numéro de sécurité sociale américain (SSN)
     kind: regex
-    action: block
+    action: anonymize
     severity: critical
-    placeholder: GOOGLE_KEY
-    pattern: "AIza[0-9A-Za-z_-]{35}"
+    placeholder: SSN
+    pattern: "\\b\\d{3}-\\d{2}-\\d{4}\\b"
 
-  - id: private-key
-    description: PEM private key header
+  - id: passport-fr
+    description: Numéro de passeport français (2 chiffres, 2 lettres, 5 chiffres)
     kind: regex
-    action: block
+    action: anonymize
     severity: critical
-    placeholder: PRIVATE_KEY
-    pattern: "-----BEGIN (?:RSA |DSA |EC |OPENSSH |PGP )?PRIVATE KEY"
+    placeholder: PASSPORT
+    pattern: "\\b\\d{2}[A-Z]{2}\\d{5}\\b"
 
+  - id: tax-number-fr
+    description: Numéro fiscal de référence français (13 chiffres)
+    kind: regex
+    action: anonymize
+    severity: high
+    placeholder: TAX_ID
+    pattern: "\\b[0-3]\\d{12}\\b"
+
+  - id: plate-fr
+    description: Plaque d'immatriculation française (SIV, AB-123-CD)
+    kind: regex
+    action: anonymize
+    severity: medium
+    placeholder: PLATE
+    pattern: "\\b[A-Z]{2}-\\d{3}-[A-Z]{2}\\b"
+
+  - id: siret-fr
+    description: Numéro SIRET (14 chiffres, espaces tolérés)
+    kind: regex
+    action: anonymize
+    severity: medium
+    placeholder: SIRET
+    pattern: "\\b\\d{3}\\s?\\d{3}\\s?\\d{3}\\s?\\d{5}\\b"
+
+  - id: vat-fr
+    description: Numéro de TVA intracommunautaire français
+    kind: regex
+    action: anonymize
+    severity: low
+    placeholder: VAT
+    pattern: "\\bFR[0-9A-Z]{2}\\d{9}\\b"
+
+  # ==========================================================================
+  # 3. Secrets, clés d'API et identifiants techniques  (action: block)
+  # ==========================================================================
   - id: password-assignment
-    description: An inline password / mot de passe
+    description: Mot de passe en clair affecté à une variable
     kind: regex
     action: block
     severity: critical
     placeholder: PASSWORD
-    pattern: "(?:password|mot de passe|mdp|pwd)\\s*[:=]\\s*\\S+"
+    pattern: "(?:password|passwd|mot de passe|mot_de_passe|mdp|pwd)\\s*[:=]\\s*\\S+"
 
-  # ------------------------------ Infrastructure -----------------------------
+  - id: credentials-in-url
+    description: Identifiants Basic Auth intégrés à une URL
+    kind: regex
+    action: block
+    severity: critical
+    placeholder: URL_CREDS
+    pattern: "https?://[^/\\s:@]+:[^/\\s:@]+@[^\\s]+"
+
+  - id: bearer-token
+    description: Jeton Bearer dans un en-tête Authorization
+    kind: regex
+    action: block
+    severity: critical
+    placeholder: BEARER
+    pattern: "Bearer\\s+[A-Za-z0-9._~+/-]{20,}=*"
+
+  - id: private-key
+    description: En-tête de clé privée PEM
+    kind: regex
+    action: block
+    severity: critical
+    placeholder: PRIVATE_KEY
+    pattern: "-----BEGIN (?:RSA |DSA |EC |OPENSSH |PGP )?PRIVATE KEY-----"
+
+  - id: aws-access-key
+    description: Identifiant de clé d'accès AWS
+    kind: regex
+    action: block
+    severity: critical
+    placeholder: AWS_KEY
+    pattern: "\\b(?:AKIA|ASIA|AGPA|AIDA|AROA|ANPA|ANVA)[0-9A-Z]{16}\\b"
+
+  - id: aws-secret-key
+    description: Clé secrète AWS (affectée explicitement)
+    kind: regex
+    action: block
+    severity: critical
+    placeholder: AWS_SECRET
+    pattern: "(?:aws_secret_access_key|aws-secret-access-key)\\s*[:=]\\s*[A-Za-z0-9/+]{40}"
+
+  - id: github-pat
+    description: Jeton d'accès personnel GitHub
+    kind: regex
+    action: block
+    severity: critical
+    placeholder: GH_PAT
+    pattern: "\\bgh[pousr]_[A-Za-z0-9]{36,}\\b"
+
+  - id: openai-key
+    description: Clé d'API OpenAI
+    kind: regex
+    action: block
+    severity: critical
+    placeholder: OPENAI_KEY
+    pattern: "\\bsk-(?:proj-)?[A-Za-z0-9_-]{20,}\\b"
+
+  - id: anthropic-key
+    description: Clé d'API Anthropic (Claude)
+    kind: regex
+    action: block
+    severity: critical
+    placeholder: ANTHROPIC_KEY
+    pattern: "\\bsk-ant-[A-Za-z0-9_-]{20,}\\b"
+
+  - id: google-api-key
+    description: Clé d'API Google
+    kind: regex
+    action: block
+    severity: critical
+    placeholder: GOOGLE_KEY
+    pattern: "\\bAIza[0-9A-Za-z_-]{35}\\b"
+
+  - id: google-oauth-id
+    description: Identifiant client OAuth Google
+    kind: regex
+    action: anonymize
+    severity: high
+    placeholder: GOOGLE_OAUTH
+    pattern: "\\b\\d+-[a-z0-9]+\\.apps\\.googleusercontent\\.com\\b"
+
+  - id: slack-token
+    description: Jeton Slack
+    kind: regex
+    action: block
+    severity: critical
+    placeholder: SLACK_TOKEN
+    pattern: "\\bxox[baprs]-[A-Za-z0-9-]{10,}\\b"
+
+  - id: stripe-key
+    description: Clé secrète/publique Stripe
+    kind: regex
+    action: block
+    severity: critical
+    placeholder: STRIPE_KEY
+    pattern: "\\b(?:sk|pk|rk)_(?:live|test)_[A-Za-z0-9]{16,}\\b"
+
+  - id: sendgrid-key
+    description: Clé d'API SendGrid
+    kind: regex
+    action: block
+    severity: critical
+    placeholder: SENDGRID_KEY
+    pattern: "\\bSG\\.[A-Za-z0-9_-]{22}\\.[A-Za-z0-9_-]{43}\\b"
+
+  - id: twilio-sid
+    description: Identifiant de compte Twilio (Account SID)
+    kind: regex
+    action: block
+    severity: high
+    placeholder: TWILIO_SID
+    pattern: "\\bAC[a-f0-9]{32}\\b"
+
+  - id: npm-token
+    description: Jeton d'accès npm
+    kind: regex
+    action: block
+    severity: critical
+    placeholder: NPM_TOKEN
+    pattern: "\\bnpm_[A-Za-z0-9]{36}\\b"
+
+  - id: generic-api-key
+    description: Affectation générique de clé d'API / token / secret
+    kind: regex
+    action: block
+    severity: high
+    placeholder: API_KEY
+    pattern: "(?:api[_-]?key|api[_-]?token|access[_-]?token|secret[_-]?key|client[_-]?secret)\\s*[:=]\\s*[\"']?[A-Za-z0-9._-]{16,}[\"']?"
+
+  # ==========================================================================
+  # 4. Cryptomonnaies
+  # ==========================================================================
+  - id: bitcoin-address
+    description: Adresse Bitcoin (legacy ou bech32)
+    kind: regex
+    action: anonymize
+    severity: high
+    placeholder: BTC_ADDR
+    pattern: "\\b(?:bc1[a-z0-9]{25,39}|[13][a-km-zA-HJ-NP-Z1-9]{25,34})\\b"
+
+  - id: ethereum-address
+    description: Adresse Ethereum
+    kind: regex
+    action: anonymize
+    severity: high
+    placeholder: ETH_ADDR
+    pattern: "\\b0x[a-fA-F0-9]{40}\\b"
+
+  # ==========================================================================
+  # 5. Infrastructure interne
+  # ==========================================================================
   - id: internal-domain
-    description: Internal-only hostnames
+    description: Noms d'hôtes internes (non publics)
     kind: regex
     action: anonymize
     severity: medium
-    placeholder: INTERNAL_DOMAIN
-    pattern: "[a-zA-Z0-9-]+\\.(?:internal|local|corp|intranet|lan)"
+    placeholder: INTERNAL_HOST
+    pattern: "\\b[a-zA-Z0-9-]+\\.(?:internal|local|corp|intranet|lan|priv|test)\\b"
 
-  # --------------------------- Sensitive keywords ----------------------------
+  - id: mac-address
+    description: Adresses MAC
+    kind: regex
+    action: anonymize
+    severity: low
+    placeholder: MAC
+    pattern: "\\b(?:[0-9A-Fa-f]{2}[:-]){5}[0-9A-Fa-f]{2}\\b"
+
+  - id: ipv6
+    description: Adresses IPv6
+    kind: regex
+    action: anonymize
+    severity: low
+    placeholder: IPV6
+    pattern: "\\b(?:[0-9A-Fa-f]{1,4}:){2,7}[0-9A-Fa-f]{1,4}\\b"
+
+  # ==========================================================================
+  # 6. Catégories sensibles RGPD (article 9) — avertissement
+  # ==========================================================================
   - id: sensitive-keywords
-    description: RGPD-sensitive terms (warn, do not block)
+    description: Termes relevant des catégories particulières / secret pro (RGPD art. 9)
     kind: words
     action: warn
     severity: high
     words:
+      # Santé
+      - "dossier médical"
+      - "diagnostic"
+      - "pathologie"
+      - "ordonnance"
+      - "traitement médical"
+      - "handicap"
+      - "grossesse"
+      # Vie privée protégée
+      - "orientation sexuelle"
+      - "appartenance syndicale"
+      - "conviction religieuse"
+      - "opinion politique"
+      - "origine ethnique"
+      - "données biométriques"
+      - "casier judiciaire"
+      - "condamnation"
+      # Rémunération / RH
       - "salaire"
       - "rémunération"
       - "bulletin de paie"
       - "fiche de paie"
-      - "dossier médical"
-      - "diagnostic"
-      - "pathologie"
-      - "casier judiciaire"
-      - "orientation sexuelle"
-      - "appartenance syndicale"
-      - "données biométriques"
-      - "secret professionnel"
+      - "évaluation annuelle"
+      # Confidentialité
       - "confidentiel"
+      - "secret professionnel"
+      - "secret des affaires"
+      - "ne pas diffuser"
       - "NDA"
+      - "clause de confidentialité"
 
-  # --------------------------- Combination example ---------------------------
+  # ==========================================================================
+  # 7. Règles combinées — se déclenchent uniquement si TOUTES les conditions
+  #    apparaissent ensemble (réduit les faux positifs).
+  # ==========================================================================
   - id: salary-with-amount
-    description: A salary term next to a money amount
+    description: Un terme de rémunération à côté d'un montant en euros
     kind: combination
     action: warn
     severity: high
     all:
       - kind: words
-        words: ["salaire", "rémunération", "salary"]
+        words: ["salaire", "rémunération", "salary", "paie"]
       - kind: regex
         pattern: "\\d[\\d\\s.,]*\\s?(?:k€?|€|EUR|euros?)"
+
+  - id: medical-with-person
+    description: Un terme médical à côté d'un nom de personne
+    kind: combination
+    action: warn
+    severity: high
+    all:
+      - kind: words
+        words: ["patient", "diagnostic", "pathologie", "dossier médical", "hospitalisé"]
+      - kind: regex
+        pattern: "(?:M\\.|Mme|Mlle|Dr)\\s+\\p{Lu}\\p{Ll}+"
+
+  - id: account-with-credential
+    description: Un identifiant de compte associé à un mot de passe
+    kind: combination
+    action: block
+    severity: critical
+    all:
+      - kind: words
+        words: ["login", "identifiant", "utilisateur", "username", "compte"]
+      - kind: regex
+        pattern: "(?:password|mot de passe|mdp|pwd)\\s*[:=]\\s*\\S+"
