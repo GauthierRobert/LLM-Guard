@@ -38,6 +38,12 @@ export const CONFIG_STORAGE_KEY = "guard_config" as const;
  * `local` allows multiple MB per item, so the rules can grow freely.
  */
 export const RULES_STORAGE_KEY = "guard_rules_yaml" as const;
+/**
+ * chrome.storage.local key remembering which bundled default last seeded the
+ * rules. When the stored rules still equal this value the DPO never customized
+ * them, so an extension update may safely re-seed with the new bundled default.
+ */
+export const RULES_SEEDED_KEY = "guard_rules_seeded_yaml" as const;
 /** chrome.storage.local key holding the rolling activity log. */
 export const LOG_STORAGE_KEY = "guard_logs" as const;
 /** chrome.storage.local key holding aggregate stats. */

@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { parseRulesYaml } from "./parse";
+import { parseRulesYaml, validateRulesYaml } from "./parse";
 import { DEFAULT_RULES_YAML, getDefaultCompiledRules } from "./defaults";
 
 describe("parseRulesYaml", () => {
@@ -90,6 +90,36 @@ rules:
       - kind: words
         words: ["only"]
 `);
+    expect(res.ok).toBe(false);
+  });
+});
+
+describe("validateRulesYaml", () => {
+  it("accepts a document that parses and compiles", () => {
+    const res = validateRulesYaml(`
+rules:
+  - id: project
+    kind: words
+    action: block
+    words: ["Project Atlas"]
+`);
+    expect(res.ok).toBe(true);
+  });
+
+  it("rejects a schema-valid rule whose regex does not compile", () => {
+    // a{2,1} passes the schema (non-empty string) but new RegExp() throws.
+    const res = validateRulesYaml(`
+rules:
+  - id: broken
+    kind: regex
+    pattern: "a{2,1}"
+`);
+    expect(res.ok).toBe(false);
+    if (!res.ok) expect(res.errors[0]).toMatch(/broken/);
+  });
+
+  it("still reports parse errors", () => {
+    const res = validateRulesYaml("rules: [unclosed");
     expect(res.ok).toBe(false);
   });
 });

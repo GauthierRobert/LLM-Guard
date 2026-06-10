@@ -12,6 +12,7 @@ import {
   LOG_STORAGE_KEY,
   MAX_LOG_ENTRIES,
   RULES_STORAGE_KEY,
+  RULES_SEEDED_KEY,
   RULES_MAX_BYTES,
   STATS_STORAGE_KEY,
   type DetectionAction,
@@ -21,7 +22,7 @@ import {
   type SetRulesResponse,
 } from "@/shared/messages";
 import { DEFAULT_RULES_YAML } from "@/core/rules/defaults";
-import { parseRulesYaml } from "@/core/rules/parse";
+import { validateRulesYaml } from "@/core/rules/parse";
 
 const BADGE_RED = "#dc2626";
 const BADGE_BLUE = "#2563eb";
@@ -73,7 +74,7 @@ async function setRulesYaml(yaml: string): Promise<SetRulesResponse> {
       ],
     };
   }
-  const parsed = parseRulesYaml(yaml);
+  const parsed = validateRulesYaml(yaml);
   if (!parsed.ok) return { ok: false, errors: parsed.errors };
   try {
     await chrome.storage.local.set({ [RULES_STORAGE_KEY]: yaml });
@@ -138,17 +139,67 @@ async function recordDetection(event: DetectionEvent): Promise<void> {
 
 /* ------------------------------- lifecycle ------------------------------- */
 
-chrome.runtime.onInstalled.addListener(() => {
+/**
+ * Seed or re-seed the stored rules from the bundled default. The stored YAML
+ * is only overwritten when the DPO never customized it (it still equals the
+ * default that seeded it) — otherwise an extension update would wipe their
+ * rules. Customized rules are left alone; the new default stays available via
+ * the Options "reset" button.
+ */
+async function seedRules(): Promise<void> {
+  const stored = await chrome.storage.local.get([RULES_STORAGE_KEY, RULES_SEEDED_KEY]);
+  const current = stored[RULES_STORAGE_KEY] as string | undefined;
+  const seeded = stored[RULES_SEEDED_KEY] as string | undefined;
+  const customized = current !== undefined && seeded !== undefined && current !== seeded;
+  if (customized || current === DEFAULT_RULES_YAML) {
+    // Keep the DPO's rules, but make sure the marker exists going forward.
+    if (current === DEFAULT_RULES_YAML && seeded !== DEFAULT_RULES_YAML) {
+      await chrome.storage.local.set({ [RULES_SEEDED_KEY]: DEFAULT_RULES_YAML });
+    }
+    return;
+  }
+  await chrome.storage.local.set({
+    [RULES_STORAGE_KEY]: DEFAULT_RULES_YAML,
+    [RULES_SEEDED_KEY]: DEFAULT_RULES_YAML,
+  });
+}
+
+/**
+ * Re-inject the ISOLATED bridge into LLM tabs that are already open. An
+ * extension install/update orphans the old bridge (its chrome.* access dies),
+ * which silently cuts the config/rules feed to those tabs until a manual
+ * refresh — saved rule edits would never reach the page again.
+ */
+async function reinjectBridges(): Promise<void> {
+  // @types/chrome's manifest type predates the `world` key on content scripts.
+  const scripts = (chrome.runtime.getManifest().content_scripts ?? []) as Array<{
+    matches?: string[];
+    js?: string[];
+    world?: string;
+  }>;
+  const bridge = scripts.find((s) => s.world !== "MAIN" && (s.js?.length ?? 0) > 0);
+  if (!bridge?.js || !bridge.matches) return;
+  const tabs = await chrome.tabs.query({ url: bridge.matches });
+  await Promise.allSettled(
+    tabs
+      .filter((tab): tab is chrome.tabs.Tab & { id: number } => tab.id !== undefined)
+      .map((tab) =>
+        chrome.scripting.executeScript({ target: { tabId: tab.id }, files: bridge.js! }),
+      ),
+  );
+}
+
+chrome.runtime.onInstalled.addListener((details) => {
   void (async () => {
     const syncStored = await chrome.storage.sync.get(CONFIG_STORAGE_KEY);
     if (syncStored[CONFIG_STORAGE_KEY] === undefined) {
       await chrome.storage.sync.set({ [CONFIG_STORAGE_KEY]: DEFAULT_CONFIG });
     }
-    const localStored = await chrome.storage.local.get(RULES_STORAGE_KEY);
-    if (localStored[RULES_STORAGE_KEY] === undefined) {
-      await chrome.storage.local.set({ [RULES_STORAGE_KEY]: DEFAULT_RULES_YAML });
-    }
+    await seedRules();
     chrome.alarms.create(RESET_ALARM, { periodInMinutes: 24 * 60 });
+    if (details.reason === "install" || details.reason === "update") {
+      await reinjectBridges();
+    }
   })();
 });
 
@@ -186,7 +237,10 @@ chrome.runtime.onMessage.addListener(
 
       case "reset-rules":
         void chrome.storage.local
-          .set({ [RULES_STORAGE_KEY]: DEFAULT_RULES_YAML })
+          .set({
+            [RULES_STORAGE_KEY]: DEFAULT_RULES_YAML,
+            [RULES_SEEDED_KEY]: DEFAULT_RULES_YAML,
+          })
           .then(() => sendResponse({ ok: true, yaml: DEFAULT_RULES_YAML }));
         return true;
 

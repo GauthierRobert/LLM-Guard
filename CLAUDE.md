@@ -48,7 +48,7 @@ Load unpacked: `chrome://extensions` → Developer mode → **Load unpacked** �
 
 **Adding an LLM:** add an adapter in `extension/src/adapters/` (implement `LLMAdapter`, optionally set `conversationSelector`), register it in `adapters/index.ts`, and add the hostname globs to `extension/manifest.config.ts`.
 
-**Editing detection rules:** change `extension/src/core/rules/rules.default.yaml` (the bundled default) or, at runtime, the Options-page YAML editor.
+**Editing detection rules:** change `extension/src/core/rules/rules.default.yaml` (the bundled default) or, at runtime, the Options-page YAML editor. Options-page saves apply live to open LLM tabs (validated — parse **and** compile — by the service worker, pushed via `storage.onChanged`). Changes to the bundled default require a rebuild + extension reload; on update the service worker re-seeds storage with the new default **only if** the stored rules were never customized (tracked via `guard_rules_seeded_yaml`), and re-injects the bridge into already-open LLM tabs so the rules feed survives the reload.
 
 ---
 

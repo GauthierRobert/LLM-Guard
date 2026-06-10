@@ -44,7 +44,7 @@ export default defineManifest({
     service_worker: "src/background/service-worker.ts",
     type: "module",
   },
-  permissions: ["storage", "alarms"],
+  permissions: ["storage", "alarms", "scripting"],
   host_permissions: LLM_HOST_GLOBS,
   content_scripts: [
     {
