@@ -9,10 +9,8 @@ import type {
 } from "@/shared/messages";
 import { DEFAULT_CONFIG } from "@/shared/messages";
 import {
-  bucketForToday,
   getConfig,
   getLogs,
-  getStats,
   sendReveal,
   setConfig,
 } from "@/popup/messaging";
@@ -58,14 +56,6 @@ function reflectReveal(): void {
   const btn = byId<HTMLButtonElement>("reveal-toggle");
   btn.textContent = revealed ? "Hide real values" : "Reveal real values";
   btn.classList.toggle("is-revealed", revealed);
-}
-
-async function loadStats(): Promise<void> {
-  const stats = await getStats().catch(() => null);
-  const bucket = bucketForToday(stats);
-  byId("stat-anonymized").textContent = String(bucket.anonymized);
-  byId("stat-blocked").textContent = String(bucket.blocked);
-  byId("stat-total").textContent = String(bucket.total);
 }
 
 function findingsLine(event: DetectionEvent): string {
@@ -127,7 +117,7 @@ async function loadActivity(): Promise<void> {
 async function persistAndRefresh(): Promise<void> {
   await setConfig(config).catch(() => undefined);
   reflectConfig();
-  await Promise.all([loadStats(), loadActivity()]);
+  await loadActivity();
 }
 
 function wireControls(): void {
@@ -167,7 +157,7 @@ async function init(): Promise<void> {
   config = await getConfig().catch(() => ({ ...DEFAULT_CONFIG }));
   reflectConfig();
   reflectReveal();
-  await Promise.all([loadStats(), loadActivity()]);
+  await loadActivity();
 }
 
 document.addEventListener("DOMContentLoaded", () => void init());

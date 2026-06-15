@@ -139,7 +139,12 @@ export function compileRules(doc: ParsedRulesDoc): CompiledRules {
     });
   }
 
-  for (const rule of doc.rules) matchers.push(compileRule(rule, doc));
+  // Rules explicitly disabled (enabled: false) stay in the document but are
+  // never compiled, so the DPO can toggle them off without deleting them.
+  for (const rule of doc.rules) {
+    if (rule.enabled === false) continue;
+    matchers.push(compileRule(rule, doc));
+  }
 
   return { version: doc.version, whitelist, matchers };
 }
