@@ -1,99 +1,109 @@
 # LLM Guard
 
-> **v3 (current):** the Chrome extension has been rewritten in TypeScript (Vite + `@crxjs`, Vitest) and now lives in **[`extension/`](extension/)** — see [`extension/README.md`](extension/README.md). The previous vanilla-JS v2 is archived under **`legacy/`**. The notes below describe v2 and the broader project (backend/dashboard).
+A Manifest V3 Chrome extension that protects personal & sensitive data in the
+prompts you send to LLM web apps (**ChatGPT, Claude, Gemini, Copilot, Mistral,
+Perplexity, DeepSeek, Grok**). It intercepts each outgoing request and acts on it
+according to **rules your DPO writes in plain YAML** — every rule declares its own
+action:
+
+- **Anonymize** — replace the detected value with a reversible `[LABEL_xxxx]`
+  placeholder before the request leaves the browser. The model never sees the raw
+  data. The answer comes back with the placeholders; you reveal the real values
+  **manually** with a button in the popup.
+- **Warn** — notify you, but send the prompt unchanged.
+- **Block** — refuse to send the prompt at all (returns a local 403).
+
+When a prompt triggers several rules, the **most severe action wins**
+(`block > anonymize > warn`).
+
+**All processing is local. No prompt content, detected value, or activity ever
+leaves the browser** — see the [privacy policy](docs/privacy-policy.html).
 
 ---
 
-## LLM Guard v2 — Extension Chrome Multi-LLM, RGPD & AI Act
+## Repository layout
 
-Extension Chrome qui intercepte, anonymise et journalise les prompts envoyés à **ChatGPT, Claude, Gemini et Copilot** pour assurer la conformité RGPD et AI Act.
+| Path | What it is |
+|------|------------|
+| **[`extension/`](extension/)** | **v3 — the current extension.** TypeScript, Vite + `@crxjs`, Vitest. See [`extension/README.md`](extension/README.md). |
+| `docs/` | `privacy-policy.html` (served via GitHub Pages for the Web Store listing). |
+| `legacy/` | The previous vanilla-JS **v2** extension (4-layer engine, telemetry, company rules), archived for reference. |
+| `api-java/`, `dashboard/`, `infra/`, `shared/` | Optional self-hosted backend + SOC dashboard (Java API, Angular 21, docker-compose). Independent of the v3 extension, which talks to no server. |
 
-## Nouveautés v2
-
-### Anonymisation automatique
-Au lieu de simplement bloquer, l'extension remplace les données personnelles par des placeholders **avant** l'envoi au LLM. L'utilisateur ne voit aucune différence, mais aucune donnée sensible ne quitte l'entreprise.
-
-**Exemple :**
-```
-Avant  : "Envoie le dossier de Mme Sophie Martin (sophie@rh.fr) au 06 12 34 56 78"
-Envoyé : "Envoie le dossier de [PERSONNE_1] ([EMAIL_2]) au [TEL_3]"
-```
-
-### Support multi-LLM
-| LLM | Domaine surveillé | Endpoint détecté |
-|-----|-------------------|------------------|
-| ChatGPT | chatgpt.com, chat.openai.com | /conversation (toutes variantes) |
-| Claude | claude.ai | /api/*chat/completion/message* |
-| Gemini | gemini.google.com | /generate, /stream, BardChatUi |
-| Copilot | copilot.microsoft.com | /api/conversation, /sydney |
-
-### Nouveaux détecteurs PII
-- **Noms de personnes** (M. Jean Dupont, Mme Martin, Dr Lefebvre…)
-- **Adresses postales** (15 rue de la Paix, 42 avenue des Champs…)
-- 12 détecteurs au total (vs 10 en v1)
-
-### Dashboard amélioré
-- Stats par LLM (quel service est le plus utilisé)
-- Compteur de prompts anonymisés
-- 3 modes : Anonymiser / Avertir / Bloquer
-
-## Installation
-
-1. Dézipper le fichier
-2. `chrome://extensions/` → Mode développeur → Charger l'extension non empaquetée
-3. Sélectionner le dossier `llm-guard-v2/`
-4. **Recharger** les pages LLM ouvertes (Ctrl+Maj+R)
-
-## Architecture
-
-```
-llm-guard-v2/
-├── manifest.json      # Manifest V3, multi-domaines
-├── content.js         # Injection MAIN — interception + anonymisation
-├── bridge.js          # Relais ISOLATED → background
-├── background.js      # Service worker — stockage + badges + telemetry
-├── telemetry.js       # Upload vers dashboard centralisé (opt-in)
-├── options.html/.js   # Configuration du backend
-├── popup.html         # Dashboard local multi-LLM
-├── shared/
-│   └── schema.json    # Contrat d'évènement (extension ↔ api ↔ dashboard)
-├── api/               # Backend FastAPI + Postgres/Timescale (self-hosted)
-├── dashboard/         # Dashboard Angular 21 (SSR, Material 3)
-├── infra/             # docker-compose, Caddy, Keycloak
-├── tests/             # 6 suites (~133 tests)
-└── icons/
-```
-
-## Dashboard centralisé (auto-hébergé)
-
-Pour les équipes sécurité qui veulent une vue de flotte, le projet inclut un backend FastAPI et un dashboard Angular 21 auto-hébergés :
-
-1. `cd infra && docker compose up -d` (Postgres+Timescale, Keycloak, API, dashboard, Caddy TLS)
-2. Créer un jeton d'appareil côté dashboard, le coller dans `chrome-extension://.../options.html`
-3. Cocher *"Activer l'envoi des métadonnées"* — seules les métadonnées et les aperçus anonymisés (`[EMAIL_1]`, `[PHONE_2]`…) quittent le navigateur
-
-Voir `infra/README.md`, `api-java/README.md`, `dashboard/README.md`.
-
-## Modes de protection
-
-| Mode | Comportement | Données critiques |
-|------|-------------|-------------------|
-| **Anonymiser** (défaut) | Remplace les PII par des placeholders | Anonymisées aussi |
-| **Avertir** | Bandeau d'alerte, laisse passer | Bloquées |
-| **Bloquer** | Empêche tout envoi contenant des PII | Bloquées |
-
-## Tests
+## Quick start (extension)
 
 ```bash
-node tests/test-scanner-v2.js       # 31 tests détection/anonymisation
-node tests/test-advanced-engine.js  # 37 tests pipeline 4 couches
-node tests/test-llm-adapters.js     # 18 tests adaptateurs LLM
-node tests/test-allowlist.js        # 6 tests allowlist
-node tests/test-company-rules.js    # 25 tests whitelist/blacklist entreprise
-node tests/test-telemetry.js        # 16 tests télémétrie (scrub, batching, retry)
+cd extension
+npm install
+npm run dev      # dev build with HMR → load ./dist unpacked
+npm run build    # typecheck + production build → ./dist
+npm test         # Vitest unit suite
+npm run lint     # ESLint
 ```
 
-## Limites et prochaines étapes
+Load it: `chrome://extensions` → enable **Developer mode** → **Load unpacked** →
+select `extension/dist`. Reload your LLM tab after building.
 
-- **Limites** : détection par regex (pas de NLP), pas de scan des fichiers uploadés, dé-anonymisation des réponses non implémentée côté navigateur (le mapping est prêt)
-- **Prochaines étapes possibles** : intégration Microsoft Presidio pour NLP, scan des images/PDF via OCR, webhook vers un SIEM, dé-anonymisation en temps réel dans les réponses SSE, alerting Slack/Teams depuis le dashboard
+## DPO rules (YAML)
+
+Rules are authored in YAML — readable by a non-developer. A default rule set is
+bundled; the **Options page** has an editor to paste/edit YAML, which is validated
+(syntax + schema + size) and applied live to open tabs.
+
+```yaml
+version: 1
+defaults: { action: anonymize, severity: medium }
+
+whitelist:                       # never flagged, even if a rule matches
+  - "support@acme.com"
+
+blacklist:                       # always flagged, with this action
+  action: block
+  severity: critical
+  values: ["Project Titan"]
+
+rules:
+  - id: email                    # kind: words | regex | combination
+    kind: regex
+    action: anonymize            # block | anonymize | warn
+    placeholder: EMAIL           # → [EMAIL_xxxx]
+    pattern: "[\\w.%+-]+@[\\w.-]+\\.[A-Za-z]{2,}"
+
+  - id: codenames
+    kind: words                  # case-insensitive, word-boundary aware
+    action: warn
+    words: ["Bluebird", "Project Falcon"]
+```
+
+Built-in **validated** matchers (credit cards via Luhn, IPv4, JWT) always run on
+top of the YAML rules, so the DPO doesn't have to express maths checks.
+
+## How it works
+
+```
+ MAIN world (content/main-world.ts)            ISOLATED world (content/bridge.ts)
+ ─ patches window.fetch                          ─ serves config + rules YAML
+ ─ findAdapter(host) → matchEndpoint(url)        ─ relays detections → SW
+ ─ evaluate(prompt, rules) → decision   ⇄ postMessage ⇄   reveal commands → MAIN
+ ─ block → 403 | warn → pass | anonymize spans              │ chrome.runtime
+ ─ reveal/hide real values in the page                      ▼
+ (content/reveal.ts)                            background/service-worker.ts
+                                                ─ logs, badge, seeds/validates rules
+```
+
+Full architecture, the detection pipeline, and how to add a new LLM service are
+documented in [`extension/README.md`](extension/README.md).
+
+## Adding an LLM service
+
+1. Create `extension/src/adapters/<service>.ts` implementing `LLMAdapter`.
+2. Register it in `extension/src/adapters/index.ts`.
+3. Add its host globs to `extension/manifest.config.ts`.
+
+---
+
+## Legacy v2 & self-hosted backend
+
+The archived **v2** extension and the optional self-hosted stack are documented
+separately: see `legacy/`, `infra/README.md`, `api-java/README.md`, and
+`dashboard/README.md`. The v3 extension does not depend on any of them.
