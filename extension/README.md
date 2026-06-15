@@ -141,7 +141,7 @@ src/
 ├── content/       # main-world.ts (MAIN), reveal.ts (MAIN), bridge.ts (ISOLATED)
 ├── background/    # service-worker.ts
 ├── ui/            # banner.ts (in-page toast)
-├── popup/         # enable switch, reveal button, stats, activity
+├── popup/         # enable switch, reveal button, recent activity
 └── options/       # enable switch + DPO YAML rules editor
 ```
 
