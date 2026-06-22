@@ -71,6 +71,9 @@ function validateRule(rule: unknown, index: number, errors: string[]): void {
   if (rule.placeholder !== undefined && typeof rule.placeholder !== "string") {
     errors.push(`${label}: "placeholder" must be text.`);
   }
+  if (rule.enabled !== undefined && typeof rule.enabled !== "boolean") {
+    errors.push(`${label}: "enabled" must be true or false.`);
+  }
 
   switch (rule.kind) {
     case "words":
@@ -180,6 +183,7 @@ function normalizeRule(rule: ParsedRule): ParsedRule {
     action: rule.action,
     severity: rule.severity,
     placeholder: rule.placeholder,
+    enabled: rule.enabled,
   };
   switch (rule.kind) {
     case "words":

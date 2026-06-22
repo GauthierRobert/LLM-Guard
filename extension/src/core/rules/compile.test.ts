@@ -23,6 +23,22 @@ describe("compileRules", () => {
     expect(res.findings[0]!.placeholderLabel).toBe("CLIENT_NAMES");
   });
 
+  it("skips rules marked enabled: false", () => {
+    const r = compileRules({
+      version: 1,
+      rules: [{ id: "off", kind: "words", action: "block", words: ["secret"], enabled: false }],
+    });
+    expect(evaluate("a secret here", r).decision).toBeNull();
+  });
+
+  it("keeps rules with enabled omitted or true", () => {
+    const r = compileRules({
+      version: 1,
+      rules: [{ id: "on", kind: "words", action: "block", words: ["secret"], enabled: true }],
+    });
+    expect(evaluate("a secret here", r).decision).toBe("block");
+  });
+
   it("throws a CompileError for an invalid regex", () => {
     expect(() =>
       compileRules({

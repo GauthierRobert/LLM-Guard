@@ -50,6 +50,11 @@ interface ParsedRuleBase {
   severity?: Severity;
   /** Placeholder label for anonymize, e.g. "PROJECT" → [PROJECT_xxxx]. */
   placeholder?: string;
+  /**
+   * When `false`, the rule is kept in the document (so the DPO can re-enable it)
+   * but excluded from compilation, so it never matches. Absent/true = active.
+   */
+  enabled?: boolean;
 }
 
 export interface ParsedWordsRule extends ParsedRuleBase {
