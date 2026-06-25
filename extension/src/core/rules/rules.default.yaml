@@ -594,17 +594,6 @@ rules:
     placeholder: PERSON
     pattern: "(?<![\\p{L}\\p{N}])(?:Jean|Pierre|Michel|Philippe|Nicolas|Christophe|François|Francois|Olivier|Sébastien|Sebastien|David|Thomas|Julien|Antoine|Vincent|Bruno|Patrick|Bernard|Alain|Laurent|Pascal|Marc|Éric|Eric|Stéphane|Stephane|Geoffroy|Gauthier|Marie|Sophie|Catherine|Anne|Isabelle|Stéphanie|Stephanie|Caroline|Julie|Émilie|Emilie|Aurélie|Aurelie|Claire|Camille|Sarah|Nathalie|Christine|Sylvie|Valérie|Valerie|Sandrine|Céline|Celine|Hélène|Helene|Lukas|Sven|Wouter|Bart|Jeroen|Koen|Dirk|Stijn|Tim|Kris)(?:[\\s-]\\p{Lu}[\\p{L}'’-]{2,})\\b"
 
-  # Particules : warn et non anonymize. C'est la règle la plus génératrice
-  # de faux positifs dans un texte juridique français malgré la liste
-  # d'exclusion ("La Cour", "Le Conseil"...). On signale, on ne remplace pas.
-  - id: name-with-particle
-    description: Patronyme à particule probable (Van, Vanden, De, Du, d') - signal seulement
-    kind: regex
-    action: warn
-    severity: medium
-    placeholder: PERSON
-    pattern: "(?<![\\p{L}\\p{N}])(?:Van\\s+(?:der\\s+|den\\s+|de\\s+)?|Vanden\\s*|Vander\\s*|De\\s+(?:la\\s+|le\\s+)?|Den\\s+|Du\\s+|d'|D')(?!(?:Cour|Tribunal|Conseil|Commission|Comité|Comite|Parlement|Chambre|Sénat|Senat|Région|Region|Communauté|Communaute|État|Etat|Union|Règlement|Reglement|Directive|Loi|Code|Constitution|Convention|Charte|Traité|Traite|Gouvernement|Ministère|Ministere|Ministre|Président|President|Justice|Banque|Haye|Wallonie|Flandre|Belgique|France|Europe)\\b)\\p{Lu}[\\p{L}'’-]{2,}\\b"
-
   - id: birth-info
     description: Date de naissance contextualisée, lieu inclus si présent
     kind: regex
