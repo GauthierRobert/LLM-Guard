@@ -31,7 +31,7 @@ function ruleToYaml(rule: Record<string, unknown>): string {
  * their request; the assistant returns the updated rule, which merges by id.
  */
 export function buildEditPrompt(rule: Record<string, unknown>): string {
-  return `You are editing ONE detection rule for "LLM Guard", a browser extension that finds sensitive data in text before it is sent to an AI assistant.
+  return `You are editing ONE detection rule for "AvoPseudo", a browser extension that finds sensitive data in text before it is sent to an AI assistant.
 
 What I need you to do:
 1. Read my request, written between << and >> below.
@@ -61,7 +61,7 @@ export function buildCreatePrompt(): string {
     placeholder: "TICKET",
     pattern: "(?<![\\p{L}\\p{N}])INC-\\d{5}(?![\\p{L}\\p{N}])",
   });
-  return `You are creating ONE new detection rule for "LLM Guard", a browser extension that finds sensitive data in text before it is sent to an AI assistant.
+  return `You are creating ONE new detection rule for "AvoPseudo", a browser extension that finds sensitive data in text before it is sent to an AI assistant.
 
 What I need you to do:
 1. Read what I want to detect, written between << and >> below.

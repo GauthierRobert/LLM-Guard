@@ -139,10 +139,10 @@ function emitDetection(
 
 function blockedResponse(): Response {
   return new Response(
-    JSON.stringify({ error: "Blocked by LLM Guard — sensitive data detected." }),
+    JSON.stringify({ error: "Blocked by AvoPseudo — sensitive data detected." }),
     {
       status: 403,
-      statusText: "Blocked by LLM Guard",
+      statusText: "Blocked by AvoPseudo",
       headers: { "content-type": "application/json" },
     },
   );

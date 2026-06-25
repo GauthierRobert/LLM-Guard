@@ -21,10 +21,10 @@ const LLM_HOST_GLOBS = [
 
 export default defineManifest({
   manifest_version: 3,
-  name: "LLM Guard",
+  name: "AvoPseudo",
   version: pkg.version,
   description:
-    "Anonymizes or blocks personal & sensitive data in prompts sent to ChatGPT, Claude, Gemini, Copilot and more.",
+    "Pseudonymises or blocks personal & sensitive data in prompts sent to ChatGPT, Claude, Gemini, Copilot and more.",
   icons: {
     16: "src/assets/icon-16.png",
     48: "src/assets/icon-48.png",
@@ -32,7 +32,7 @@ export default defineManifest({
   },
   action: {
     default_popup: "src/popup/popup.html",
-    default_title: "LLM Guard",
+    default_title: "AvoPseudo",
     default_icon: {
       16: "src/assets/icon-16.png",
       48: "src/assets/icon-48.png",

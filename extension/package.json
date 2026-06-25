@@ -1,6 +1,6 @@
 {
   "name": "llm-guard-extension",
-  "version": "3.0.0",
+  "version": "4.0.0",
   "private": true,
   "type": "module",
   "description": "LLM Guard v3 — Chrome extension (Manifest V3) that anonymizes or blocks PII in prompts sent to LLM services.",

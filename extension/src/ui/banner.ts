@@ -64,7 +64,7 @@ export function showBanner(opts: { message: string; tone: Tone }): void {
     ls.textTransform = "uppercase";
     ls.color = accent;
     ls.marginBottom = "2px";
-    label.textContent = "LLM Guard";
+    label.textContent = "AvoPseudo";
 
     const body = document.createElement("div");
     body.textContent = opts.message;
