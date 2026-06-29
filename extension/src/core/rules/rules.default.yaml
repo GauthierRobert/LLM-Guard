@@ -1,58 +1,74 @@
 # ============================================================================
-# LLM Guard - règles de détection (BE / FR)
-# Version 6 - réécriture complète
+# LLM Guard - regles de detection (BE / FR)
+# Version 7
 #
-# Philosophie du fichier, dans l'ordre de priorité :
+# Objectif : pseudonymisation fiable pour avocats et juristes, priorite a la
+# precision (peu de faux positifs) tout en couvrant largement noms, donnees
+# a caractere personnel, donnees sensibles, secrets d'affaires.
 #
-#   1. PRÉCISION D'ABORD. Une règle n'anonymise automatiquement que si son
-#      motif est quasi certain (format strict, checksum possible, ou
-#      contexte explicite). Tout ce qui est ambigu passe en "warn" :
-#      l'utilisateur garde un texte lisible et décide lui-même.
-#      Un texte caviardé de faux positifs est illisible ET dangereux,
-#      car l'utilisateur cesse de faire confiance à l'outil.
+# Changements v7 (corriges et verifies sur banc de test) :
+#   - case-number-be : corrige le bug du point final ("R.G. 2023/1234").
+#   - person-title / birth / address / context : tolerance aux accents
+#     manquants sur les ANCRES (Maitre/Maitre, ne/nee/ne/nee, chaussee...).
+#   - company-legal-form : exclusion des determinants majuscules en tete
+#     (Ladite SA, Notre SA, Cette SA... ne sont plus caviardes).
+#   - medication : separe en dosage pharmaceutique strict (mg/ug/mcg, regex)
+#     et dosage faible (g/ml/UI) sous contexte sante obligatoire. Supprime
+#     les faux positifs de type "Annexe 3 g".
+#   - employee-or-client-id : prefixe alphabetique elargi (matricules longs).
+#   - liste de prenoms BE/FR etendue (toujours sous garde "+ token Majuscule").
 #
-#   2. LES VRAIS SECRETS BLOQUENT. Mots de passe, clés d'API, tokens :
-#      action block, jamais de compromis.
+# ----------------------------------------------------------------------------
+# CONTRAT MOTEUR (a respecter cote code - non negociable pour la qualite) :
 #
-#   3. TROIS NIVEAUX DE CONFIANCE :
-#      - regex seule          : format intrinsèquement identifiant
-#                               (IBAN, NRN, carte, email, téléphone...)
-#      - combination          : format banal + mot-clé de contexte requis
-#                               (passeport, permis, BIC, SIRET, matricule...)
-#      - words / warn         : signal sémantique, jamais de remplacement
-#                               (données art. 9, secret professionnel...)
+#   1. Compilation : new RegExp(pattern, "gu"). JAMAIS de flag "i" global
+#      (il casserait les \p{Lu}). La casse utile est geree par classes [Pp].
 #
-# Hypothèse moteur : regex JavaScript compilées avec les flags "gu".
-# AUCUN motif n'utilise "(?i)" : ce modificateur inline n'existe pas en
-# JavaScript. La casse est gérée par des classes explicites [Pp] là où
-# c'est utile. Ne PAS compiler ces motifs avec un flag "i" global : cela
-# casserait les \p{Lu} des règles de noms propres.
+#   2. Matching des "words" et des conditions "combination" : INSENSIBLE A LA
+#      CASSE *ET* AUX DIACRITIQUES. Implementation recommandee : normaliser une
+#      copie fantome du texte (NFD + suppression des marques combinantes) pour
+#      la recherche des mots-cles uniquement, puis reporter les offsets sur le
+#      texte d'origine. Tous les accents latins concernes ici sont 1:1 sous
+#      NFD (e->e, a->a, i->i, c->c...), donc l'alignement des offsets reste
+#      exact. Cas non 1:1 (ae, oe) a pre-expanser si besoin. Sans ce repli,
+#      un prompt sans accents ("indemnite", "remuneration") manquera les
+#      mots-cles accentues et certaines combination ne se declencheront pas.
 #
-# Recommandations moteur (code, pas YAML) :
-#   - combination : exiger la proximité des conditions (fenêtre d'environ
-#     150 caractères ou même phrase), sinon un mot-clé en début de prompt
-#     contamine tout le texte ;
-#   - priorité d'application : block > anonymize > warn ; à action égale,
-#     motif le plus long en cas de chevauchement ; jamais de remplacement
-#     à l'intérieur d'un mot déjà remplacé ;
-#   - ordre de passage : secrets techniques, puis identifiants numériques
-#     (IBAN, NRN, cartes, téléphones), puis adresses, puis personnes ;
-#   - pseudonymisation cohérente : même valeur source = même placeholder
-#     dans tout le prompt (déjà le cas, à conserver) ;
-#   - checksums fortement recommandés : IBAN (mod 97-10), NRN belge
-#     (mod 97 sur 9 chiffres, tester aussi avec préfixe "2" pour les
-#     personnes nées après 1999), cartes de paiement (Luhn). C'est le
-#     seul moyen d'éliminer les derniers faux positifs numériques sans
-#     perdre de détection.
+#   3. Proximite des combination : fenetre d'environ 150 caracteres entre le
+#      mot-cle et le motif, sinon un mot-cle en tete de prompt contamine tout.
+#
+#   4. Priorite d'application : block > anonymize > warn. A action egale,
+#      motif le plus long en cas de chevauchement. Jamais de remplacement a
+#      l'interieur d'un span deja remplace.
+#
+#   5. Ordre de passage : secrets techniques, puis identifiants numeriques
+#      (IBAN, NRN, cartes, telephones), puis adresses, puis personnes.
+#
+#   6. Pseudonymisation coherente : meme valeur source = meme placeholder
+#      dans tout le prompt.
+#
+#   7. Checksums fortement recommandes (eliminent les derniers faux positifs
+#      numeriques) : IBAN (mod 97-10), NRN belge (mod 97 sur 9 chiffres,
+#      tester aussi avec prefixe "2" pour les personnes nees apres 1999),
+#      cartes (Luhn). Le moteur doit invalider un match dont le checksum
+#      echoue, sans bloquer le reste du texte.
+#
+# ----------------------------------------------------------------------------
+# LIMITE STRUCTURELLE CONNUE (regex pure, sans NER) :
+#   Un nom NON precede d'un titre et ABSENT de la liste de prenoms (ex.
+#   "Mertens a appele", "Dossier suivi par Lec") ne sera PAS auto-pseudonymise.
+#   Aucune regex ne distingue un patronyme inconnu d'un nom commun. Mitigations
+#   prevues : (a) blacklist par dossier ci-dessous, a alimenter a l'ouverture ;
+#   (b) ajout ulterieur d'une couche NER cote moteur. L'etage "warn" signale
+#   sans alterer, pour preserver la lisibilite.
 # ============================================================================
 
-version: 6
+version: 7
 
 defaults:
   action: anonymize
   severity: medium
 
-# Valeurs jamais détectées, quelle que soit la règle.
 whitelist:
   - "support@example.com"
   - "contact@example.com"
@@ -68,10 +84,9 @@ whitelist:
   - "192.168.1.1"
   - "localhost"
 
-# Noms de clients, de dossiers et de projets en cours. C'est ici, et non
-# dans les regex, que se joue la protection des dénominations qu'aucune
-# règle générique ne peut deviner ("Meridian", "Projet Titan"...).
-# À alimenter à chaque ouverture de dossier sensible.
+# Noms de clients, de dossiers et de projets en cours. C'est ici, et non dans
+# les regex, que se joue la protection des denominations qu'aucune regle
+# generique ne peut deviner. A alimenter a chaque ouverture de dossier.
 blacklist:
   action: anonymize
   severity: critical
@@ -84,11 +99,10 @@ rules:
 
   # ==========================================================================
   # SECTION A - SECRETS TECHNIQUES (action: block)
-  # Un secret qui fuit est irrécupérable. Aucune anonymisation : blocage.
   # ==========================================================================
 
   - id: private-key
-    description: Clé privée PEM
+    description: Cle privee PEM
     kind: regex
     action: block
     severity: critical
@@ -96,7 +110,7 @@ rules:
     pattern: "-----BEGIN (?:RSA |DSA |EC |OPENSSH |PGP )?PRIVATE KEY-----"
 
   - id: password-assignment
-    description: Mot de passe en clair, mots intercalés tolérés ("mot de passe du portail :")
+    description: Mot de passe en clair, mots intercales toleres
     kind: regex
     action: block
     severity: critical
@@ -104,7 +118,7 @@ rules:
     pattern: "(?:[Pp]assword|[Pp]asswd|[Mm]ot[ _]de[ _]passe|MDP|[Mm]dp|PWD|[Pp]wd)[^:=\\n]{0,40}[:=]\\s*\\S+"
 
   - id: credentials-in-url
-    description: Identifiants Basic Auth dans une URL (https://user:pass@hôte)
+    description: Identifiants Basic Auth dans une URL
     kind: regex
     action: block
     severity: critical
@@ -112,7 +126,7 @@ rules:
     pattern: "https?://[^/\\s:@]+:[^/\\s:@]+@\\S+"
 
   - id: url-access-token
-    description: Jeton d'accès en paramètre d'URL (token=, key=, sig=, code=)
+    description: Jeton d'acces en parametre d'URL
     kind: regex
     action: block
     severity: critical
@@ -120,7 +134,7 @@ rules:
     pattern: "(?<=[?&])(?:token|access_token|auth|apikey|api_key|key|sig(?:nature)?|code)=[A-Za-z0-9._~%+/-]{8,}"
 
   - id: jwt-token
-    description: Jeton JWT complet (header.payload.signature)
+    description: Jeton JWT complet
     kind: regex
     action: block
     severity: critical
@@ -128,7 +142,7 @@ rules:
     pattern: "(?<![\\p{L}\\p{N}])eyJ[A-Za-z0-9_-]{8,}\\.eyJ[A-Za-z0-9_-]{8,}\\.[A-Za-z0-9_-]{8,}(?![\\p{L}\\p{N}])"
 
   - id: bearer-token
-    description: Jeton Bearer (en-tête Authorization)
+    description: Jeton Bearer
     kind: regex
     action: block
     severity: critical
@@ -136,7 +150,7 @@ rules:
     pattern: "[Bb]earer\\s+[A-Za-z0-9._~+/-]{20,}=*"
 
   - id: anthropic-key
-    description: Clé d'API Anthropic (à évaluer avant openai-key, motif plus spécifique)
+    description: Cle d'API Anthropic
     kind: regex
     action: block
     severity: critical
@@ -144,7 +158,7 @@ rules:
     pattern: "(?<![\\p{L}\\p{N}])sk-ant-[A-Za-z0-9_-]{20,}(?![\\p{L}\\p{N}])"
 
   - id: openai-key
-    description: Clé d'API OpenAI
+    description: Cle d'API OpenAI
     kind: regex
     action: block
     severity: critical
@@ -152,7 +166,7 @@ rules:
     pattern: "(?<![\\p{L}\\p{N}])sk-(?:proj-)?[A-Za-z0-9_-]{20,}(?![\\p{L}\\p{N}])"
 
   - id: aws-access-key
-    description: Clé d'accès AWS
+    description: Cle d'acces AWS
     kind: regex
     action: block
     severity: critical
@@ -160,7 +174,7 @@ rules:
     pattern: "(?<![\\p{L}\\p{N}])(?:AKIA|ASIA|AGPA|AIDA|AROA|ANPA|ANVA)[0-9A-Z]{16}(?![\\p{L}\\p{N}])"
 
   - id: google-api-key
-    description: Clé d'API Google
+    description: Cle d'API Google
     kind: regex
     action: block
     severity: critical
@@ -208,7 +222,7 @@ rules:
     pattern: "https://hooks\\.slack\\.com/services/[A-Za-z0-9/_-]+"
 
   - id: stripe-key
-    description: Clé Stripe
+    description: Cle Stripe
     kind: regex
     action: block
     severity: critical
@@ -216,7 +230,7 @@ rules:
     pattern: "(?<![\\p{L}\\p{N}])(?:sk|pk|rk)_(?:live|test)_[A-Za-z0-9]{16,}(?![\\p{L}\\p{N}])"
 
   - id: sendgrid-key
-    description: Clé SendGrid
+    description: Cle SendGrid
     kind: regex
     action: block
     severity: critical
@@ -232,7 +246,7 @@ rules:
     pattern: "(?<![\\p{L}\\p{N}])npm_[A-Za-z0-9]{36}(?![\\p{L}\\p{N}])"
 
   - id: generic-secret-assignment
-    description: Affectation générique de clé, token ou secret (clé = valeur)
+    description: Affectation generique de cle, token ou secret
     kind: regex
     action: block
     severity: high
@@ -240,14 +254,9 @@ rules:
     pattern: "(?:[Aa][Pp][Ii][_-]?(?:[Kk][Ee][Yy]|[Tt][Oo][Kk][Ee][Nn])|[Aa]ccess[_-]?[Tt]oken|[Aa]uth[_-]?[Tt]oken|[Ss]ecret[_-]?[Kk]ey|[Cc]lient[_-]?[Ss]ecret|[Cc]onnection[_-]?[Ss]tring|[Aa]ws[_-][Ss]ecret[_-][Aa]ccess[_-][Kk]ey)\\s*[:=]\\s*[\"']?[A-Za-z0-9._/+-]{16,}[\"']?"
 
   # ==========================================================================
-  # SECTION B - IDENTIFIANTS À FORMAT FORT (anonymize, regex seule)
-  # Formats suffisamment spécifiques pour être remplacés sans contexte.
+  # SECTION B - IDENTIFIANTS A FORMAT FORT (anonymize, regex seule)
   # ==========================================================================
 
-  # Le lookahead final tolère un point de ponctuation après l'adresse
-  # ("...à jp.dupont@gmail.com. Son épouse...") : seul un point suivi
-  # d'un caractère alphanumérique est rejeté (il ferait alors partie
-  # d'un domaine plus long, consommé par le motif lui-même).
   - id: email
     description: Adresse e-mail
     kind: regex
@@ -256,9 +265,8 @@ rules:
     placeholder: EMAIL
     pattern: "(?<![\\p{L}\\p{N}._%+-])[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\\.[a-zA-Z]{2,}(?!\\.?[a-zA-Z0-9_%+-])"
 
-  # Checksum mod 97 recommandée côté moteur. Mois 21-32 / 41-52 = numéros BIS.
   - id: nrn-be
-    description: Numéro de registre national belge (NISS), y compris BIS
+    description: Numero de registre national belge (NISS), y compris BIS. Checksum mod 97 cote moteur.
     kind: regex
     action: anonymize
     severity: critical
@@ -266,7 +274,7 @@ rules:
     pattern: "(?<![\\p{L}\\p{N}])\\d{2}[.\\s]?(?:0[1-9]|1[0-2]|2[1-9]|3[0-2]|4[1-9]|5[0-2])[.\\s]?(?:0[1-9]|[12]\\d|3[01])[\\s.-]?\\d{3}[.\\s]?\\d{2}(?![\\p{L}\\p{N}])"
 
   - id: eid-be
-    description: Numéro de carte d'identité belge (xxx-xxxxxxx-xx)
+    description: Numero de carte d'identite belge (xxx-xxxxxxx-xx)
     kind: regex
     action: anonymize
     severity: critical
@@ -274,44 +282,39 @@ rules:
     pattern: "(?<![\\p{L}\\p{N}])\\d{3}-\\d{7}-\\d{2}(?![\\p{L}\\p{N}])"
 
   - id: nir-fr
-    description: Numéro de sécurité sociale français (NIR)
+    description: Numero de securite sociale francais (NIR)
     kind: regex
     action: anonymize
     severity: critical
     placeholder: NIR
     pattern: "(?<![\\p{L}\\p{N}])[12]\\s?\\d{2}\\s?\\d{2}\\s?(?:\\d{2}|2[AB])\\s?\\d{3}\\s?\\d{3}\\s?\\d{2}(?![\\p{L}\\p{N}])"
 
-  # Checksum mod 97-10 recommandée côté moteur.
   - id: iban
-    description: IBAN
+    description: IBAN. Checksum mod 97-10 cote moteur.
     kind: regex
     action: anonymize
     severity: critical
     placeholder: IBAN
     pattern: "(?<![\\p{L}\\p{N}])[A-Z]{2}\\d{2}\\s?(?:[\\dA-Z]{4}\\s?){2,7}[\\dA-Z]{1,4}(?![\\p{L}\\p{N}])"
 
-  # Luhn recommandée côté moteur (élimine quasi tous les faux positifs).
   - id: payment-card
-    description: Carte de paiement (Visa, Mastercard, Amex)
+    description: Carte de paiement. Luhn cote moteur.
     kind: regex
     action: anonymize
     severity: critical
     placeholder: CARD
     pattern: "(?<![\\p{L}\\p{N}])(?:4\\d{3}|5[1-5]\\d{2}|2[2-7]\\d{2}|3[47]\\d{2})(?:[ -]?\\d{4}){2}[ -]?\\d{3,4}(?![\\p{L}\\p{N}])"
 
-  # 9-10 chiffres au total : couvre 0470 12 34 56, 02 123 45 67,
-  # 02/123.45.67, +32 470 12 34 56, sans matcher les dates JJ/MM/AAAA.
   - id: phone-be
-    description: Téléphone belge, fixe et mobile
+    description: Telephone belge, fixe et mobile
     kind: regex
     action: anonymize
     severity: high
     placeholder: PHONE
     pattern: "(?<![\\p{L}\\p{N}])(?:(?:\\+|00)32[\\s./-]?|0)[1-9](?:[\\s./-]?\\d){7,8}(?!\\d)"
 
-  # "/" exclu des séparateurs : fréquent dans les dates, rare dans les numéros FR.
   - id: phone-fr
-    description: Téléphone français, fixe et mobile
+    description: Telephone francais, fixe et mobile
     kind: regex
     action: anonymize
     severity: high
@@ -319,7 +322,7 @@ rules:
     pattern: "(?<![\\p{L}\\p{N}])(?:(?:\\+|00)33[\\s.-]?|0)[1-9](?:[\\s.-]?\\d{2}){4}(?!\\d)"
 
   - id: phone-intl
-    description: Numéro international E.164
+    description: Numero international E.164
     kind: regex
     action: anonymize
     severity: medium
@@ -327,7 +330,7 @@ rules:
     pattern: "(?<![\\p{L}\\p{N}])\\+\\d{1,3}[\\s.-]?\\d{4,14}(?![\\p{L}\\p{N}])"
 
   - id: plate-be
-    description: Plaque d'immatriculation belge (1-ABC-123 et formats anciens)
+    description: Plaque d'immatriculation belge
     kind: regex
     action: anonymize
     severity: medium
@@ -335,7 +338,7 @@ rules:
     pattern: "(?<![\\p{L}\\p{N}])(?:[1-9]-[A-Z]{3}-\\d{3}|[A-Z]{3}-\\d{3}|\\d{3}-[A-Z]{3})(?![\\p{L}\\p{N}])"
 
   - id: plate-fr
-    description: Plaque d'immatriculation française SIV (AB-123-CD)
+    description: Plaque d'immatriculation francaise SIV
     kind: regex
     action: anonymize
     severity: medium
@@ -343,7 +346,7 @@ rules:
     pattern: "(?<![\\p{L}\\p{N}])[A-Z]{2}-\\d{3}-[A-Z]{2}(?![\\p{L}\\p{N}])"
 
   - id: passport-fr
-    description: Passeport français (2 chiffres + 2 lettres + 5 chiffres)
+    description: Passeport francais (2 chiffres + 2 lettres + 5 chiffres)
     kind: regex
     action: anonymize
     severity: critical
@@ -351,7 +354,7 @@ rules:
     pattern: "(?<![\\p{L}\\p{N}])\\d{2}[A-Z]{2}\\d{5}(?![\\p{L}\\p{N}])"
 
   - id: vat-be
-    description: TVA belge (BE 0xxx.xxx.xxx)
+    description: TVA belge
     kind: regex
     action: anonymize
     severity: low
@@ -359,7 +362,7 @@ rules:
     pattern: "(?<![\\p{L}\\p{N}])BE\\s?[01]\\d{3}[.\\s]?\\d{3}[.\\s]?\\d{3}(?![\\p{L}\\p{N}])"
 
   - id: vat-fr
-    description: TVA française (FRxx xxxxxxxxx)
+    description: TVA francaise
     kind: regex
     action: anonymize
     severity: low
@@ -367,7 +370,7 @@ rules:
     pattern: "(?<![\\p{L}\\p{N}])FR[0-9A-Z]{2}\\d{9}(?![\\p{L}\\p{N}])"
 
   - id: bce-dotted
-    description: Numéro d'entreprise BCE/KBO au format pointé (0xxx.xxx.xxx)
+    description: Numero d'entreprise BCE/KBO au format pointe
     kind: regex
     action: anonymize
     severity: medium
@@ -375,7 +378,7 @@ rules:
     pattern: "(?<![\\p{L}\\p{N}])[01]\\d{3}\\.\\d{3}\\.\\d{3}(?![\\p{L}\\p{N}])"
 
   - id: bitcoin-address
-    description: Adresse Bitcoin (legacy ou bech32)
+    description: Adresse Bitcoin
     kind: regex
     action: anonymize
     severity: high
@@ -391,7 +394,7 @@ rules:
     pattern: "(?<![\\p{L}\\p{N}])0x[a-fA-F0-9]{40}(?![\\p{L}\\p{N}])"
 
   - id: ipv4
-    description: Adresse IPv4 (IP usuelles exclues via whitelist)
+    description: Adresse IPv4
     kind: regex
     action: anonymize
     severity: medium
@@ -415,7 +418,7 @@ rules:
     pattern: "(?<![\\p{L}\\p{N}])(?:[0-9A-Fa-f]{2}[:-]){5}[0-9A-Fa-f]{2}(?![\\p{L}\\p{N}])"
 
   - id: internal-host
-    description: Hôte ou URL interne (.local, .internal, .corp...)
+    description: Hote ou URL interne
     kind: regex
     action: anonymize
     severity: medium
@@ -423,13 +426,11 @@ rules:
     pattern: "(?:https?://)?[a-zA-Z0-9.-]+\\.(?:internal|local|corp|intranet|lan|priv|test)(?:/\\S*)?(?![\\p{L}\\p{N}])"
 
   # ==========================================================================
-  # SECTION C - IDENTIFIANTS À CONTEXTE REQUIS (anonymize, combination)
-  # Formats trop banals seuls : un mot-clé doit confirmer la nature de la
-  # donnée. La proximité (fenêtre ~150 caractères) est essentielle ici.
+  # SECTION C - IDENTIFIANTS A CONTEXTE REQUIS (anonymize, combination)
   # ==========================================================================
 
   - id: bic-swift
-    description: Code BIC/SWIFT, mot-clé requis (sinon tout mot de 8 lettres matche)
+    description: Code BIC/SWIFT, mot-cle requis
     kind: combination
     action: anonymize
     severity: high
@@ -441,7 +442,7 @@ rules:
         pattern: "(?<![\\p{L}\\p{N}])[A-Z]{4}[A-Z]{2}[A-Z0-9]{2}(?:[A-Z0-9]{3})?(?![\\p{L}\\p{N}])"
 
   - id: passport-be
-    description: Passeport belge/européen (lettres + chiffres), contexte requis
+    description: Passeport belge/europeen, contexte requis
     kind: combination
     action: anonymize
     severity: critical
@@ -460,200 +461,218 @@ rules:
     placeholder: LICENCE
     all:
       - kind: words
-        words: ["permis de conduire", "permis n°", "rijbewijs", "driving licence"]
+        words: ["permis de conduire", "permis n", "rijbewijs", "driving licence"]
       - kind: regex
         pattern: "(?<![\\p{L}\\p{N}])[A-Z]?\\d{8,10}(?![\\p{L}\\p{N}])"
 
   - id: bce-raw
-    description: Numéro BCE/KBO brut (10 chiffres), contexte requis
+    description: Numero BCE/KBO brut (10 chiffres), contexte requis
     kind: combination
     action: anonymize
     severity: medium
     placeholder: BCE
     all:
       - kind: words
-        words: ["BCE", "KBO", "numéro d'entreprise", "n° d'entreprise", "ondernemingsnummer"]
+        words: ["BCE", "KBO", "numero d'entreprise", "n d'entreprise", "ondernemingsnummer"]
       - kind: regex
         pattern: "(?<![\\p{L}\\p{N}])[01]\\d{9}(?![\\p{L}\\p{N}])"
 
   - id: siret-fr
-    description: SIRET/SIREN français, contexte requis
+    description: SIRET/SIREN francais, contexte requis
     kind: combination
     action: anonymize
     severity: medium
     placeholder: SIRET
     all:
       - kind: words
-        words: ["SIRET", "siret", "SIREN", "siren"]
+        words: ["SIRET", "SIREN"]
       - kind: regex
         pattern: "(?<![\\p{L}\\p{N}])\\d{3}\\s?\\d{3}\\s?\\d{3}(?:\\s?\\d{5})?(?![\\p{L}\\p{N}])"
 
   - id: tax-number-fr
-    description: Numéro fiscal français (13 chiffres), contexte requis
+    description: Numero fiscal francais (13 chiffres), contexte requis
     kind: combination
     action: anonymize
     severity: high
     placeholder: TAX_ID
     all:
       - kind: words
-        words: ["numéro fiscal", "n° fiscal", "référence fiscale", "NIF"]
+        words: ["numero fiscal", "n fiscal", "reference fiscale", "NIF"]
       - kind: regex
         pattern: "(?<![\\p{L}\\p{N}])[0-3]\\d{12}(?![\\p{L}\\p{N}])"
 
   - id: employee-or-client-id
-    description: Matricule, identifiant employé ou référence client, contexte requis
+    description: Matricule, identifiant employe ou reference client, contexte requis
     kind: combination
     action: anonymize
     severity: high
     placeholder: INTERNAL_ID
     all:
       - kind: words
-        words: ["matricule", "identifiant employé", "id employé", "numéro employé", "employee id", "référence client", "réf client", "identifiant client", "numéro client", "customer id"]
+        words: ["matricule", "identifiant employe", "id employe", "numero employe", "employee id", "reference client", "ref client", "identifiant client", "numero client", "customer id", "numero de dossier", "ref dossier"]
       - kind: regex
-        pattern: "(?<![\\p{L}\\p{N}])[A-Z]{1,6}[-_]?\\d{3,10}(?![\\p{L}\\p{N}])"
+        pattern: "(?<![\\p{L}\\p{N}])[A-Z]{0,8}[-_/]?\\d{3,10}(?![\\p{L}\\p{N}])"
 
   - id: salary-amount
-    description: Montant de rémunération, contexte requis
+    description: Montant de remuneration, contexte requis
     kind: combination
     action: anonymize
     severity: high
     placeholder: AMOUNT
     all:
       - kind: words
-        words: ["salaire", "rémunération", "brut mensuel", "net mensuel", "mensuel brut", "mensuel net", "fiche de paie", "bulletin de paie"]
+        words: ["salaire", "remuneration", "brut mensuel", "net mensuel", "mensuel brut", "mensuel net", "fiche de paie", "bulletin de paie", "appointements", "package salarial"]
       - kind: regex
-        pattern: "(?<![\\p{L}\\p{N}])\\d[\\d\\s.,]*\\s?(?:€|EUR|euros?|k€)(?![\\p{L}\\p{N}])"
+        pattern: "(?<![\\p{L}\\p{N}])\\d[\\d\\s.,]*\\s?(?:\u20ac|EUR|euros?|k\u20ac)(?![\\p{L}\\p{N}])"
 
   - id: case-financial-amount
-    description: Montant dans un contexte d'indemnisation, budget ou négociation
+    description: Montant dans un contexte d'indemnisation, budget ou negociation
     kind: combination
     action: anonymize
     severity: high
     placeholder: AMOUNT
     all:
       - kind: words
-        words: ["indemnisation", "indemnité", "provision", "dommages et intérêts", "budget", "marge", "chiffre d'affaires", "offre financière", "conditions financières", "remise", "prévisions financières"]
+        words: ["indemnisation", "indemnite", "provision", "dommages et interets", "budget", "marge", "chiffre d'affaires", "offre financiere", "conditions financieres", "remise", "previsions financieres", "montant transactionnel", "quantum"]
       - kind: regex
-        pattern: "(?<![\\p{L}\\p{N}])\\d[\\d\\s.,]*\\s?(?:€|EUR|euros?|k€|M€|millions?)(?![\\p{L}\\p{N}])"
+        pattern: "(?<![\\p{L}\\p{N}])\\d[\\d\\s.,]*\\s?(?:\u20ac|EUR|euros?|k\u20ac|M\u20ac|millions?)(?![\\p{L}\\p{N}])"
 
-  - id: medication-dosage
-    description: Médicament avec dosage (donnée de santé art. 9 très identifiante)
+  # Dosage pharmaceutique strict : mg/ug/mcg suffisent (un mot capitalise suivi
+  # de ces unites est quasi toujours un medicament). Donnee de sante art. 9.
+  - id: medication-dosage-strong
+    description: Medicament avec dosage pharmaceutique (mg/ug/mcg)
     kind: regex
     action: anonymize
     severity: high
     placeholder: MED
-    pattern: "(?<![\\p{L}\\p{N}])\\p{Lu}[\\p{L}-]{3,}\\s?\\d{1,4}\\s?(?:mg|µg|mcg|g|ml)(?![\\p{L}\\p{N}])"
+    pattern: "(?<![\\p{L}\\p{N}])\\p{Lu}[\\p{L}-]{2,}\\s?\\d{1,4}(?:[.,]\\d{1,2})?\\s?(?:mg|\u00b5g|mcg)(?![\\p{L}\\p{N}])"
+
+  # Dosage faible (g/ml/cl/UI) : ces unites sont trop communes (numerotation de
+  # pieces, volumes divers). Contexte sante obligatoire pour eviter "Annexe 3 g".
+  - id: medication-dosage-weak
+    description: Medicament avec unite ambigue (g/ml/cl/UI), contexte sante requis
+    kind: combination
+    action: anonymize
+    severity: high
+    placeholder: MED
+    all:
+      - kind: words
+        words: ["comprime", "gelule", "dose", "posologie", "traitement", "prescrit", "prescrite", "ordonnance", "medicament", "matin et soir", "par jour", "/jour", "prend", "administre", "voie orale"]
+      - kind: regex
+        pattern: "(?<![\\p{L}\\p{N}])\\p{Lu}[\\p{L}-]{2,}\\s?\\d{1,4}(?:[.,]\\d{1,2})?\\s?(?:g|ml|mL|cl|UI)(?![\\p{L}\\p{N}])"
 
   # ==========================================================================
-  # SECTION D - PERSONNES PHYSIQUES (anonymize si marqueur fort, sinon warn)
-  # Les regex ne font pas du NER : on n'anonymise que sur marqueur explicite
-  # (titre, contexte introductif). Le reste passe en warn pour préserver la
-  # lisibilité. La blacklist complète le dispositif pour les noms de dossiers.
+  # SECTION D - PERSONNES PHYSIQUES
+  # Anonymize sur marqueur fort (titre, contexte introductif, prenom connu),
+  # warn sinon. Ancres tolerantes aux accents manquants.
   # ==========================================================================
 
   - id: person-title-fullname
-    description: Titre + prénom + nom ("Monsieur Jean Dupont", "Me Vincent Janssens")
+    description: Titre + prenom + nom ("Monsieur Jean Dupont", "Me Vincent Janssens")
     kind: regex
     action: anonymize
     severity: high
     placeholder: PERSON
-    pattern: "(?<![\\p{L}\\p{N}])(?:M\\.|MM\\.|Monsieur|Mme|Madame|Mlle|Dr|Pr|Professeur|Maître|Me)\\s+\\p{Lu}[\\p{L}'’-]{2,}(?:[\\s-]+\\p{Lu}[\\p{L}'’-]{2,}){1,3}\\b"
+    pattern: "(?<![\\p{L}\\p{N}])(?:M\\.|MM\\.|Monsieur|Mme|Madame|Mlle|Dr|Pr|Professeur|Ma[i\u00ee]tre|Me)\\s+\\p{Lu}[\\p{L}'\u2019-]{2,}(?:[\\s-]+(?:(?:[Dd]e|[Dd]en|[Dd]er|[Dd]u|[Dd]a|[Dd]el|[Dd]ella|[Dd]i|[Dd]os|[Ll]e|[Ll]a|[Vv]an|[Vv]anden|[Vv]ander|[Vv]on|[Tt]en|[Tt]er)\\s+)?\\p{Lu}[\\p{L}'\u2019-]{1,}){1,3}\\b"
 
   - id: person-title-single
-    description: Titre + nom seul ("Dr Martens") - anonymisé aussi, le titre est un marqueur fort
+    description: Titre + nom seul ("Dr Martens", "Madame Lec")
     kind: regex
     action: anonymize
     severity: high
     placeholder: PERSON
-    pattern: "(?<![\\p{L}\\p{N}])(?:M\\.|Monsieur|Mme|Madame|Mlle|Dr|Pr|Maître|Me)\\s+\\p{Lu}[\\p{L}'’-]{2,}\\b"
+    pattern: "(?<![\\p{L}\\p{N}])(?:M\\.|Monsieur|Mme|Madame|Mlle|Dr|Pr|Ma[i\u00ee]tre|Me)\\s+\\p{Lu}[\\p{L}'\u2019-]{2,}\\b"
 
   - id: person-context-explicit
-    description: Nom après marqueur introductif (contact, signé, représenté par...)
+    description: Nom apres marqueur introductif (contact, signe, represente par...)
     kind: regex
     action: anonymize
     severity: high
     placeholder: PERSON
-    pattern: "(?:[Àà] l'attention de|[Aa]ttn?\\.|[Cc]ontact\\s*:|[Ss]igné\\s*:|[Dd]e la part de|[Rr]eprésentée? par|[Mm]andatée? par|[Ss]on épouse,?|[Ss]on époux,?|[Ss]a compagne,?|[Ss]on compagnon,?)\\s+(?:M\\.\\s+|Mme\\s+|Madame\\s+|Monsieur\\s+)?\\p{Lu}[\\p{L}'’-]{2,}(?:[\\s-]+\\p{Lu}[\\p{L}'’-]{2,}){0,3}\\b"
+    pattern: "(?:[\u00c0\u00e0Aa] l'attention de|[Aa]ttn?\\.|[Cc]ontact\\s*:|[Ss]ign[\u00e9e]\\s*:|[Dd]e la part de|[Rr]epr[\u00e9e]sent[\u00e9e]e? par|[Mm]andat[\u00e9e]e? par|[Ss]on [\u00e9e]pouse,?|[Ss]on [\u00e9e]poux,?|[Ss]a compagne,?|[Ss]on compagnon,?)\\s+(?:M\\.\\s+|Mme\\s+|Madame\\s+|Monsieur\\s+)?\\p{Lu}[\\p{L}'\u2019-]{2,}(?:[\\s-]+(?:(?:[Dd]e|[Dd]en|[Dd]er|[Dd]u|[Dd]a|[Dd]el|[Dd]ella|[Dd]i|[Dd]os|[Ll]e|[Ll]a|[Vv]an|[Vv]anden|[Vv]ander|[Vv]on|[Tt]en|[Tt]er)\\s+)?\\p{Lu}[\\p{L}'\u2019-]{1,}){0,3}\\b"
 
   - id: matter-name
-    description: Nom de dossier ou de partie après marqueur ("Dossier Dupont c. ...")
+    description: Nom de dossier ou de partie ("Dossier Dupont c. ...")
     kind: regex
     action: anonymize
     severity: high
     placeholder: MATTER
-    pattern: "(?:[Cc]lient|[Dd]ossier|[Aa]ffaire|[Dd]emandeur(?:esse)?|[Dd]éfendeur(?:esse)?|[Pp]artie adverse)\\s*[:\\-]?\\s+\\p{Lu}[\\p{L}'’-]{2,}(?:\\s+(?:c\\.|c/|contre)\\s+\\p{Lu}[\\p{L}'’&.\\s-]{2,40}|(?:\\s+\\p{Lu}[\\p{L}'’-]{2,}){0,3})\\b"
+    pattern: "(?:[Cc]lient|[Dd]ossier|[Aa]ffaire|[Dd]emandeur(?:esse)?|[Dd][\u00e9e]fendeur(?:esse)?|[Pp]artie adverse)\\s*[:\\-]?\\s+\\p{Lu}[\\p{L}'\u2019-]{2,}(?:\\s+(?:c\\.|c/|contre)\\s+\\p{Lu}[\\p{L}'\u2019&.\\s-]{2,40}|(?:\\s+\\p{Lu}[\\p{L}'\u2019-]{2,}){0,3})\\b"
 
-  # Prénom courant + nom : anonymize. Liste volontairement limitée aux
-  # prénoms très fréquents BE/FR : chaque ajout augmente le rappel mais
-  # aussi le risque de matcher un toponyme ou une marque.
   - id: person-common-firstname
-    description: Prénom courant suivi d'un nom de famille probable
+    description: Prenom courant suivi d'un nom de famille probable
     kind: regex
     action: anonymize
     severity: high
     placeholder: PERSON
-    pattern: "(?<![\\p{L}\\p{N}])(?:Jean|Pierre|Michel|Philippe|Nicolas|Christophe|François|Francois|Olivier|Sébastien|Sebastien|David|Thomas|Julien|Antoine|Vincent|Bruno|Patrick|Bernard|Alain|Laurent|Pascal|Marc|Éric|Eric|Stéphane|Stephane|Geoffroy|Gauthier|Marie|Sophie|Catherine|Anne|Isabelle|Stéphanie|Stephanie|Caroline|Julie|Émilie|Emilie|Aurélie|Aurelie|Claire|Camille|Sarah|Nathalie|Christine|Sylvie|Valérie|Valerie|Sandrine|Céline|Celine|Hélène|Helene|Lukas|Sven|Wouter|Bart|Jeroen|Koen|Dirk|Stijn|Tim|Kris)(?:[\\s-]\\p{Lu}[\\p{L}'’-]{2,})\\b"
+    pattern: "(?<![\\p{L}\\p{N}])(?:Jean|Pierre|Michel|Philippe|Nicolas|Christophe|Fran\u00e7ois|Francois|Olivier|S\u00e9bastien|Sebastien|David|Thomas|Julien|Antoine|Vincent|Bruno|Patrick|Bernard|Alain|Laurent|Pascal|Marc|\u00c9ric|Eric|St\u00e9phane|Stephane|Geoffroy|Gauthier|Guillaume|Maxime|Quentin|Florian|Damien|Gr\u00e9gory|Gregory|Jonathan|Benjamin|Arnaud|C\u00e9dric|Cedric|Romain|Thibault|Thibaut|Mathieu|Matthieu|Fr\u00e9d\u00e9ric|Frederic|Xavier|Emmanuel|Gilles|Hugo|Lucas|Nathan|Louis|Adrien|Simon|Rapha\u00ebl|Raphael|Victor|Ga\u00ebtan|Gaetan|Maxence|Renaud|Beno\u00eet|Benoit|Paul|Luc|Guy|Yves|Denis|Serge|Bertrand|Joseph|Raymond|Georges|Henri|Andr\u00e9|Andre|Robert|Daniel|Jacques|Claude|\u00c9tienne|Etienne|Gabriel|Arthur|Jules|Fabien|Cyril|Alexandre|Alexis|Marie|Sophie|Catherine|Anne|Isabelle|St\u00e9phanie|Stephanie|Caroline|Julie|\u00c9milie|Emilie|Aur\u00e9lie|Aurelie|Claire|Camille|Sarah|Nathalie|Christine|Sylvie|Val\u00e9rie|Valerie|Sandrine|C\u00e9line|Celine|H\u00e9l\u00e8ne|Helene|Laura|Manon|L\u00e9a|Lea|Chlo\u00e9|Chloe|Emma|Justine|Pauline|Charlotte|\u00c9lise|Elise|Margaux|Oc\u00e9ane|Oceane|Audrey|M\u00e9lanie|Melanie|Delphine|Florence|V\u00e9ronique|Veronique|Brigitte|Martine|Monique|Jacqueline|Fran\u00e7oise|Francoise|Patricia|Virginie|\u00c9lodie|Elodie|S\u00e9verine|Severine|Fanny|Am\u00e9lie|Amelie|In\u00e8s|Ines|Laetitia|No\u00e9mie|Noemie|Agn\u00e8s|Agnes|C\u00e9cile|Cecile|B\u00e9atrice|Beatrice|Genevi\u00e8ve|Genevieve|Madeleine|Suzanne|Th\u00e9r\u00e8se|Therese|Nicole|Chantal|Christiane|Mireille|Aline|Carine|Nadia|Lukas|Sven|Wouter|Bart|Jeroen|Koen|Dirk|Stijn|Tim|Kris|Maarten|Tom|Jan|Pieter|Lieven|Geert|Filip)(?:[\\s-]+(?:(?:[Dd]e|[Dd]en|[Dd]er|[Dd]u|[Dd]a|[Dd]el|[Dd]ella|[Dd]i|[Dd]os|[Ll]e|[Ll]a|[Vv]an|[Vv]anden|[Vv]ander|[Vv]on|[Tt]en|[Tt]er)\\s+)?\\p{Lu}[\\p{L}'\u2019-]{1,})\\b"
+
+  - id: name-with-particle
+    description: Patronyme a particule probable (Van, Vanden, De, Du, d') - signal seulement
+    kind: regex
+    action: warn
+    severity: medium
+    placeholder: PERSON
+    pattern: "(?<![\\p{L}\\p{N}])(?:Van\\s+(?:der\\s+|den\\s+|de\\s+)?|Vanden\\s*|Vander\\s*|De\\s+(?:la\\s+|le\\s+)?|Den\\s+|Du\\s+|d'|D')(?!(?:Cour|Tribunal|Conseil|Commission|Comit\u00e9|Comite|Parlement|Chambre|S\u00e9nat|Senat|R\u00e9gion|Region|Communaut\u00e9|Communaute|\u00c9tat|Etat|Union|R\u00e8glement|Reglement|Directive|Loi|Code|Constitution|Convention|Charte|Trait\u00e9|Traite|Gouvernement|Minist\u00e8re|Ministere|Ministre|Pr\u00e9sident|President|Justice|Banque|Haye|Wallonie|Flandre|Belgique|France|Europe)\\b)\\p{Lu}[\\p{L}'\u2019-]{2,}\\b"
 
   - id: birth-info
-    description: Date de naissance contextualisée, lieu inclus si présent
+    description: Date de naissance contextualisee, lieu inclus si present
     kind: regex
     action: anonymize
     severity: high
     placeholder: DOB
-    pattern: "(?:\\b[Nn]ée?\\s+le|\\b[Dd]ate\\s+de\\s+naissance\\s*:?)\\s+(?:0?[1-9]|[12]\\d|3[01])[/.\\-\\s](?:0?[1-9]|1[0-2]|janvier|février|fevrier|mars|avril|mai|juin|juillet|août|aout|septembre|octobre|novembre|décembre|decembre)[/.\\-\\s](?:19|20)\\d{2}(?:\\s+à\\s+\\p{Lu}[\\p{L}'’-]{2,}(?:[\\s-]\\p{Lu}[\\p{L}'’-]{2,}){0,2})?"
+    pattern: "(?:\\b[Nn][\u00e9e]e?\\s+le|\\b[Dd]ate\\s+de\\s+naissance\\s*:?)\\s+(?:0?[1-9]|[12]\\d|3[01])[/.\\-\\s](?:0?[1-9]|1[0-2]|janvier|f[\u00e9e]vrier|mars|avril|mai|juin|juillet|ao[u\u00fb]t|septembre|octobre|novembre|d[\u00e9e]cembre)[/.\\-\\s](?:19|20)\\d{2}(?:\\s+\u00e0\\s+\\p{Lu}[\\p{L}'\u2019-]{2,}(?:[\\s-]\\p{Lu}[\\p{L}'\u2019-]{2,}){0,2})?"
 
   # ==========================================================================
   # SECTION E - ADRESSES ET LOCALISATION
-  # Les adresses complètes sont anonymisées. Le code postal + ville seul
-  # passe en warn : trop de faux positifs (années + mots capitalisés) et
-  # une localité seule n'identifie pas une personne.
   # ==========================================================================
 
   - id: address-street-first
-    description: Adresse belge, rue avant numéro ("rue de la Station 42")
+    description: Adresse belge, rue avant numero
     kind: regex
     action: anonymize
     severity: high
     placeholder: ADDRESS
-    pattern: "(?<![\\p{L}\\p{N}])(?:[Rr]ue|[Aa]venue|[Aa]v\\.|[Bb]oulevard|[Bb]d|[Pp]lace|[Cc]haussée|[Dd]rève|[Qq]uai|[Ss]quare|[Ii]mpasse|[Aa]llée|[Cc]hemin|[Ss]entier|[Cc]los|[Rr]oute)\\s+(?:de\\s+(?:la|l'|le)\\s+|du\\s+|des\\s+|d'\\s*)?[\\p{L}0-9][\\p{L}0-9\\s'’.-]{2,60}\\s+\\d{1,4}(?:[/-]?[A-Za-z0-9]{1,4})?(?![\\p{L}\\p{N}])"
+    pattern: "(?<![\\p{L}\\p{N}])(?:[Rr]ue|[Aa]venue|[Aa]v\\.|[Bb]oulevard|[Bb]d|[Pp]lace|[Cc]hauss[\u00e9e]e|[Dd]r[\u00e8e]ve|[Qq]uai|[Ss]quare|[Ii]mpasse|[Aa]ll[\u00e9e]e|[Cc]hemin|[Ss]entier|[Cc]los|[Rr]oute)\\s+(?:de\\s+(?:la|l'|le)\\s+|du\\s+|des\\s+|d'\\s*)?[\\p{L}0-9][\\p{L}0-9\\s'\u2019.-]{2,60}\\s+\\d{1,4}(?:[/-]?[A-Za-z0-9]{1,4})?(?![\\p{L}\\p{N}])"
 
   - id: address-number-first
-    description: Adresse française, numéro avant rue ("42 rue de la Station")
+    description: Adresse francaise, numero avant rue
     kind: regex
     action: anonymize
     severity: high
     placeholder: ADDRESS
-    pattern: "(?<![\\p{L}\\p{N}])\\d{1,4}(?:\\s?(?:bis|ter|bte|boîte|box))?\\s+(?:rue|avenue|av\\.|boulevard|bd|place|impasse|allée|chemin|route|quai|cours|passage|square|chaussée|drève|sentier|clos)\\s+[\\p{L}0-9][\\p{L}0-9\\s'’.-]{2,60}(?![\\p{L}\\p{N}])"
+    pattern: "(?<![\\p{L}\\p{N}])\\d{1,4}(?:\\s?(?:bis|ter|bte|bo[i\u00ee]te|box))?\\s+(?:rue|avenue|av\\.|boulevard|bd|place|impasse|all[\u00e9e]e|chemin|route|quai|cours|passage|square|chauss[\u00e9e]e|dr[\u00e8e]ve|sentier|clos)\\s+[\\p{L}0-9][\\p{L}0-9\\s'\u2019.-]{2,60}(?![\\p{L}\\p{N}])"
 
   - id: postal-city
-    description: Code postal + ville isolés - signal seulement
+    description: Code postal + ville isoles - signal seulement
     kind: regex
     action: warn
     severity: low
     placeholder: POSTAL
-    pattern: "(?<![\\p{L}\\p{N}])[1-9]\\d{3,4}\\s+\\p{Lu}[\\p{L}'’-]{2,}(?:\\s+\\p{Lu}[\\p{L}'’-]{2,}){0,2}\\b"
+    pattern: "(?<![\\p{L}\\p{N}])[1-9]\\d{3,4}\\s+\\p{Lu}[\\p{L}'\u2019-]{2,}(?:\\s+\\p{Lu}[\\p{L}'\u2019-]{2,}){0,2}\\b"
 
   # ==========================================================================
-  # SECTION F - SOCIÉTÉS ET RÉFÉRENCES JUDICIAIRES
+  # SECTION F - SOCIETES ET REFERENCES JUDICIAIRES
   # ==========================================================================
 
+  # Exclusion des determinants/pronoms majuscules en tete : evite "Ladite SA",
+  # "Notre SA", "Cette SA"... Si une vraie denomination suit dans la phrase,
+  # elle reste captee a partir de son propre token.
   - id: company-legal-form
-    description: Dénomination sociale suivie d'une forme juridique
+    description: Denomination sociale suivie d'une forme juridique
     kind: regex
     action: anonymize
     severity: medium
     placeholder: COMPANY
-    pattern: "(?<![\\p{L}\\p{N}])\\p{Lu}[\\p{L}0-9'’&.-]{2,}(?:\\s+\\p{Lu}[\\p{L}0-9'’&.-]{2,}){0,4}\\s+(?:SA|SRL|SPRL|BVBA|SC|SCRL|CVBA|SCA|SNC|SComm|VOF|CommV|SAS|SASU|SARL|BV|NV|GmbH|Ltd|Limited|LLC|LLP|Inc\\.?|Corp\\.?|PLC|AG|SE|ASBL|AISBL|VZW|vzw)(?![\\p{L}\\p{N}])"
+    pattern: "(?<![\\p{L}\\p{N}])(?!(?:Cette|Cet|Ladite|Ledit|Lesdits|Lesdites|Notre|Nos|Votre|Vos|Leur|Leurs|Mon|Ton|Son|Ses|Une|Des|Aux|Cela|Ceci|Toute|Cette)\\b)\\p{Lu}[\\p{L}0-9'\u2019&.-]{2,}(?:\\s+\\p{Lu}[\\p{L}0-9'\u2019&.-]{2,}){0,4}\\s+(?:SA|SRL|SPRL|BVBA|SC|SCRL|CVBA|SCA|SNC|SComm|VOF|CommV|SAS|SASU|SARL|BV|NV|GmbH|Ltd|Limited|LLC|LLP|Inc\\.?|Corp\\.?|PLC|AG|SE|ASBL|AISBL|VZW|vzw)(?![\\p{L}\\p{N}])"
 
-  # Adjacence du marqueur RG/rôle exigée : sans elle, les références
-  # d'actes UE (2016/679, 2024/1689) seraient caviardées.
   - id: case-number-be
-    description: Numéro de rôle judiciaire belge, marqueur adjacent exigé
+    description: Numero de role judiciaire belge, marqueur adjacent exige
     kind: regex
     action: anonymize
     severity: high
     placeholder: CASE_ID
-    pattern: "(?:\\bR\\.?\\s?G\\.?\\b|[Nn][°o]\\s*de\\s*rôle|[Rr]ôle\\s*(?:général\\s*)?[Nn]?[°o]?)\\s*:?\\s*\\d{2,4}\\s?/\\s?\\d{1,5}(?:/[A-Z]{1,3})?"
+    pattern: "(?:R\\.?\\s?G\\.?|[Nn][\u00b0o]\\s*de\\s*r[\u00f4o]le|[Rr][\u00f4o]le\\s*(?:g[\u00e9e]n[\u00e9e]ral\\s*)?[Nn]?[\u00b0o]?)[\\s.:\\-]*\\d{2,4}\\s?/\\s?\\d{1,5}(?:/[A-Z]{1,3})?"
 
   - id: project-code-name
     description: Nom de code ou de projet introduit par un marqueur
@@ -661,69 +680,68 @@ rules:
     action: anonymize
     severity: high
     placeholder: PROJECT
-    pattern: "(?:[Nn]om de code|[Cc]ode name|[Pp]rojet)\\s+[«\"']?\\p{Lu}[\\p{L}0-9_-]{2,}[»\"']?"
+    pattern: "(?:[Nn]om de code|[Cc]ode name|[Pp]rojet)\\s+[\u00ab\"']?\\p{Lu}[\\p{L}0-9_-]{2,}[\u00bb\"']?"
 
   # ==========================================================================
-  # SECTION G - SIGNAUX SÉMANTIQUES (warn uniquement, jamais de remplacement)
-  # Ces règles n'altèrent pas le texte : elles alertent l'utilisateur qu'il
-  # s'apprête à envoyer un contenu sensible. Listes volontairement courtes :
-  # un avertissement qui se déclenche à chaque prompt perd toute valeur.
+  # SECTION G - SIGNAUX SEMANTIQUES (warn uniquement, jamais de remplacement)
   # ==========================================================================
 
   - id: special-category-data
-    description: Catégories particulières RGPD art. 9
+    description: Categories particulieres RGPD art. 9
     kind: words
     action: warn
     severity: high
     words:
-      - "dossier médical"
+      - "dossier medical"
       - "diagnostic"
-      - "diagnostiqué"
-      - "diagnostiquée"
+      - "diagnostique"
       - "pathologie"
-      - "traitement médical"
-      - "antidépresseur"
+      - "traitement medical"
+      - "antidepresseur"
       - "hospitalisation"
-      - "incapacité de travail"
+      - "incapacite de travail"
       - "handicap"
       - "grossesse"
       - "orientation sexuelle"
       - "appartenance syndicale"
-      - "délégué syndical"
-      - "déléguée syndicale"
+      - "delegue syndical"
+      - "deleguee syndicale"
       - "conviction religieuse"
       - "association cultuelle"
       - "opinion politique"
       - "origine ethnique"
-      - "données biométriques"
-      - "données génétiques"
+      - "donnees biometriques"
+      - "donnees genetiques"
 
   - id: criminal-data
-    description: Données judiciaires RGPD art. 10
+    description: Donnees judiciaires RGPD art. 10
     kind: words
     action: warn
     severity: high
     words:
       - "casier judiciaire"
       - "condamnation"
-      - "plainte pénale"
-      - "enquête pénale"
+      - "plainte penale"
+      - "enquete penale"
       - "instruction judiciaire"
       - "juge d'instruction"
       - "inculpation"
+      - "mise en examen"
 
   - id: lawyer-confidentiality
-    description: Secret professionnel et travail préparatoire de l'avocat
+    description: Secret professionnel et travail preparatoire de l'avocat
     kind: words
     action: warn
     severity: high
     words:
       - "secret professionnel"
-      - "stratégie juridique"
-      - "stratégie de négociation"
+      - "strategie juridique"
+      - "strategie de negociation"
       - "note de plaidoirie"
       - "projet de conclusions"
       - "proposition transactionnelle"
+      - "confidentiel avocat"
+      - "correspondance entre avocats"
 
   - id: business-confidential
     description: Secrets d'affaires et informations non publiques
@@ -735,25 +753,26 @@ rules:
       - "ne pas diffuser"
       - "secret des affaires"
       - "information non publique"
-      - "non communiqué au marché"
-      - "prévisions financières"
-      - "marge bénéficiaire"
+      - "non communique au marche"
+      - "previsions financieres"
+      - "marge beneficiaire"
       - "liste de clients prioritaires"
-      - "méthode propriétaire"
+      - "methode proprietaire"
       - "algorithme interne"
       - "savoir-faire confidentiel"
 
   - id: hr-sensitive
-    description: Données RH sensibles
+    description: Donnees RH sensibles
     kind: words
     action: warn
     severity: high
     words:
       - "sanction disciplinaire"
-      - "évaluation de performance"
+      - "evaluation de performance"
       - "plainte RH"
-      - "harcèlement"
+      - "harcelement"
       - "discrimination"
       - "burn-out"
-      - "congé maladie"
+      - "conge maladie"
       - "historique d'absences"
+

@@ -12,15 +12,33 @@ The new extension lives entirely under **`extension/`**. The previous vanilla-JS
 
 ```bash
 cd extension
-npm install        # or rely on the SessionStart hook (.claude/hooks/session-start.sh)
-npm run dev        # Vite dev build with HMR (load extension/dist unpacked)
-npm run build      # tsc --noEmit + production build to extension/dist
-npm test           # Vitest unit suite (core detection, anonymizer, adapters)
-npm run typecheck  # tsc --noEmit
-npm run lint       # ESLint (flat config, typescript-eslint)
+npm install            # or rely on the SessionStart hook (.claude/hooks/session-start.sh)
+npm run dev            # Vite dev build (Chrome) with HMR → extension/dist/chrome
+npm run dev:firefox    # Vite dev build (Firefox) → extension/dist/firefox
+npm run build          # tsc --noEmit, then build BOTH packages (chrome + firefox)
+npm run build:chrome   # production build → extension/dist/chrome
+npm run build:firefox  # production build → extension/dist/firefox
+npm test               # Vitest unit suite (core detection, anonymizer, adapters)
+npm run typecheck      # tsc --noEmit
+npm run lint           # ESLint (flat config, typescript-eslint)
 ```
 
-Load unpacked: `chrome://extensions` → Developer mode → **Load unpacked** → select `extension/dist`.
+**Cross-browser build (one engine, two packages):** the shared `src/` engine is built
+twice, once per target. The `BROWSER` env var (`chrome` | `firefox`, default `chrome`,
+set via `cross-env` in the npm scripts) drives both `vite.config.ts` (output dir
+`dist/<browser>` + `crx({ browser })`) and `manifest.config.ts` (Chrome uses
+`background.service_worker`; Firefox uses `background.scripts` + a required
+`browser_specific_settings.gecko` id and `strict_min_version: "128.0"`, since
+`world: "MAIN"` content scripts need Firefox 128+). `npm run build` emits both.
+
+Load unpacked (Chrome): `chrome://extensions` → Developer mode → **Load unpacked** → select `extension/dist/chrome`.
+Load temporary (Firefox): `about:debugging#/runtime/this-firefox` → **Load Temporary Add-on** → select `extension/dist/firefox/manifest.json`.
+
+**Publishing:** see `extension/RELEASE.md`. Firefox ships as a **listed** add-on on AMO
+(signed by Mozilla) via `web-ext` — `npm run lint:firefox` (AMO validator, 0 errors
+required), `npm run package:firefox` (zip), `npm run sign:firefox` / `release:firefox`
+(build → lint → sign, using `WEB_EXT_API_KEY` / `WEB_EXT_API_SECRET`). The gecko id is
+fixed in `manifest.config.ts` and must not change after the first submission.
 
 ### Architecture (`extension/src/`)
 

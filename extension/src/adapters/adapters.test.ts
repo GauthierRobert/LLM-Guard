@@ -186,6 +186,14 @@ describe("perplexityAdapter", () => {
     expect(out.messages[0].content).toBe("[REDACTED]");
     expect(body.query).toBe("px query");
   });
+
+  it("extracts and injects the real perplexity_ask query_str shape", () => {
+    const real = { query_str: "px ask", params: { source: "default" } };
+    expect(perplexityAdapter.extractPrompts(real)).toEqual(["px ask"]);
+    const out = perplexityAdapter.injectPrompts(real, REDACT) as typeof real;
+    expect(out.query_str).toBe("[REDACTED]");
+    expect(real.query_str).toBe("px ask");
+  });
 });
 
 describe("deepseekAdapter", () => {

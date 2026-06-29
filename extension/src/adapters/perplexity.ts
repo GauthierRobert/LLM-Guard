@@ -17,6 +17,10 @@ export const perplexityAdapter: LLMAdapter = {
   extractPrompts(body: unknown): string[] {
     if (!isObject(body)) return [];
     const out: string[] = [];
+    // Perplexity's /rest/sse/perplexity_ask carries the user text in `query_str`
+    // (top level), with metadata under `params`. `query`/`messages` are kept for
+    // other/legacy endpoints.
+    if (isString(body.query_str)) out.push(body.query_str);
     if (isString(body.query)) out.push(body.query);
     for (const msg of asArray(body.messages)) {
       if (!isObject(msg) || msg.role !== "user") continue;
@@ -28,6 +32,7 @@ export const perplexityAdapter: LLMAdapter = {
   injectPrompts(body: unknown, transform: TextTransform): unknown {
     if (!isObject(body)) return body;
     const clone = structuredClone(body) as Record<string, unknown>;
+    if (isString(clone.query_str)) clone.query_str = transform(clone.query_str);
     if (isString(clone.query)) clone.query = transform(clone.query);
     for (const msg of asArray(clone.messages)) {
       if (!isObject(msg) || msg.role !== "user") continue;

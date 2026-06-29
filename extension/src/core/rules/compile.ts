@@ -37,14 +37,23 @@ function wordRegex(word: string): RegExp {
   return new RegExp(`(?<![\\p{L}\\p{N}_])${esc}(?![\\p{L}\\p{N}_])`, "giu");
 }
 
-/** Compile a user-supplied pattern; invalid patterns become a CompileError. */
+/**
+ * Compile a user-supplied pattern. Deliberately NO global `i` flag: under
+ * `/iu`, Unicode case-folding makes `\p{Lu}` (and `[A-Z]`) match lowercase too,
+ * which silently destroys the "starts with a capital → likely a proper noun"
+ * signal every PERSON / COMPANY / MATTER rule relies on (mass false positives
+ * on ordinary lowercase French words). Case tolerance is expressed in the
+ * patterns themselves via classes like `[Pp]assword`; keyword matching keeps
+ * its own case-insensitivity in `wordRegex`, independent of this flag.
+ * Invalid patterns become a CompileError.
+ */
 function userRegex(pattern: string, ruleId: string): RegExp {
   try {
-    return new RegExp(pattern, "giu");
+    return new RegExp(pattern, "gu");
   } catch {
     // 'u' can reject patterns with otherwise-tolerated escapes; retry without it.
     try {
-      return new RegExp(pattern, "gi");
+      return new RegExp(pattern, "g");
     } catch (err) {
       throw new CompileError(
         `Rule "${ruleId}": invalid regular expression — ${(err as Error).message}`,
