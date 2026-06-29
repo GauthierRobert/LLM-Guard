@@ -52,8 +52,22 @@ export default defineManifest({
   background: isFirefox
     ? { scripts: ["src/background/service-worker.ts"] }
     : { service_worker: "src/background/service-worker.ts", type: "module" },
-  permissions: ["storage", "alarms", "scripting"],
+  // "offscreen" (Chrome only) hosts the NER model off the service worker;
+  // Firefox has no offscreen API and runs it in the background script instead.
+  permissions: isFirefox
+    ? ["storage", "alarms", "scripting"]
+    : ["storage", "alarms", "scripting", "offscreen"],
   host_permissions: LLM_HOST_GLOBS,
+  // The NER layer downloads its model + ONNX WASM from these CDNs (cached by the
+  // browser) and needs wasm-unsafe-eval to run it. Applies to extension pages
+  // (offscreen / background), not the LLM page itself.
+  content_security_policy: {
+    // huggingface.co serves model metadata; weights (LFS/Xet blobs) come from
+    // *.hf.co (e.g. us.aws.cdn.hf.co) and *.huggingface.co (cdn-lfs.*). ONNX
+    // WASM is bundled locally / on jsdelivr.
+    extension_pages:
+      "script-src 'self' 'wasm-unsafe-eval'; object-src 'self'; connect-src 'self' https://huggingface.co https://*.huggingface.co https://*.hf.co https://cdn.jsdelivr.net;",
+  },
   content_scripts: [
     {
       // MAIN world: monkey-patches window.fetch to intercept prompts.

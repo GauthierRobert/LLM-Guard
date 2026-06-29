@@ -16,14 +16,23 @@ import {
   RULES_STORAGE_KEY,
   isGuardMessage,
   type GuardConfig,
+  type NerDetectResponse,
   type RevealResponse,
   type TabMessage,
 } from "@/shared/messages";
 
+/** Merge a possibly-old stored config with defaults so new keys (e.g. ner) exist. */
+function withDefaults(raw: Partial<GuardConfig> | undefined): GuardConfig {
+  return {
+    enabled: raw?.enabled ?? DEFAULT_CONFIG.enabled,
+    ner: raw?.ner ?? DEFAULT_CONFIG.ner,
+  };
+}
+
 async function readConfig(): Promise<GuardConfig> {
   try {
     const stored = await chrome.storage.sync.get(CONFIG_STORAGE_KEY);
-    return (stored[CONFIG_STORAGE_KEY] as GuardConfig | undefined) ?? DEFAULT_CONFIG;
+    return withDefaults(stored[CONFIG_STORAGE_KEY] as Partial<GuardConfig> | undefined);
   } catch {
     return DEFAULT_CONFIG;
   }
@@ -56,6 +65,27 @@ async function pushRules(): Promise<void> {
   if (yaml !== null) post({ ns: GUARD_NS, kind: "rules", payload: { yaml } });
 }
 
+/**
+ * MAIN can't reach chrome.*; forward its NER request to the service worker
+ * (which routes to the offscreen/background host) and post the result back,
+ * keyed by the request id. Always answers — [] on any failure.
+ */
+function relayNer(id: string, text: string): void {
+  void (async () => {
+    let entities: NerDetectResponse["entities"] = [];
+    try {
+      const resp = (await chrome.runtime.sendMessage({
+        kind: "ner-detect",
+        payload: { text },
+      })) as NerDetectResponse | undefined;
+      if (resp?.ok) entities = resp.entities;
+    } catch {
+      /* worker asleep / context invalidated → empty result */
+    }
+    post({ ns: GUARD_NS, kind: "ner-result", payload: { id, entities } });
+  })();
+}
+
 /* ----------------------- MAIN ⇄ ISOLATED (postMessage) -------------------- */
 
 // Pending reveal request awaiting MAIN's result, so we can answer the popup.
@@ -72,6 +102,8 @@ window.addEventListener("message", (event: MessageEvent) => {
     } catch {
       /* worker asleep / context invalidated */
     }
+  } else if (data.kind === "ner-request") {
+    relayNer(data.payload.id, data.payload.text);
   } else if (data.kind === "config-request") {
     void pushConfig();
     void pushRules();
@@ -117,7 +149,7 @@ chrome.storage.onChanged.addListener((changes, area) => {
     post({
       ns: GUARD_NS,
       kind: "config",
-      payload: (changes[CONFIG_STORAGE_KEY]?.newValue as GuardConfig | undefined) ?? DEFAULT_CONFIG,
+      payload: withDefaults(changes[CONFIG_STORAGE_KEY]?.newValue as Partial<GuardConfig> | undefined),
     });
   }
   if (area === "local" && RULES_STORAGE_KEY in changes) {

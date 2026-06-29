@@ -45,22 +45,26 @@ fixed in `manifest.config.ts` and must not change after the first submission.
 | Path | Role |
 |------|------|
 | `shared/types.ts` | Domain contracts: `Severity`, `AnonymizeSpan`, `IAnonymizer` |
-| `shared/messages.ts` | Cross-context messaging + `GuardConfig` (`enabled` only) + rules/reveal messages + storage keys |
+| `shared/messages.ts` | Cross-context messaging + `GuardConfig` (`enabled` + `ner`) + rules/reveal/NER messages + storage keys |
 | `core/rules/rules.default.yaml` | Bundled, DPO-readable default rules (imported via Vite `?raw`) |
 | `core/rules/{types,schema,parse,compile,engine,defaults}.ts` | YAML rule model → validate → compile to regex matchers → `evaluate(text)` |
 | `core/match.ts` | Generic `resolveOverlaps()` — collapses overlapping spans into one non-overlapping set |
 | `core/validators.ts` | Luhn / IPv4 / JWT / reserved-email validators (used by built-in matchers) |
 | `core/anonymizer.ts` | `Anonymizer`: `anonymizeSpans()` (reversible `[LABEL_xxxx]`), `deanonymize()`, `exportMap()` |
+| `core/ner/{types,merge,engine,host}.ts` | **NER layer (v4.3)**: `NerConfig` + `mergeNerFindings()` (pure, merges model entities into the rules result, regex wins overlaps), transformers.js `detectEntities()`, and the cross-browser `detectViaHost()` |
 | `adapters/*.ts` | Per-service request shapers + optional `conversationSelector` (reveal scope), implementing `LLMAdapter` |
-| `content/main-world.ts` | MAIN world: patches `window.fetch`, runs `evaluate()`, anonymizes anonymize-action spans, handles reveal |
+| `content/main-world.ts` | MAIN world: patches `window.fetch`, runs `evaluate()`, awaits NER, anonymizes anonymize-action spans, handles reveal |
 | `content/reveal.ts` | MAIN world: in-page reveal/hide of real values (TreeWalker, marker spans, React-safe) |
-| `content/bridge.ts` | ISOLATED world: relays config + rules + reveal commands and detection events |
-| `background/service-worker.ts` | Stores logs/stats, seeds + validates + serves rules YAML, updates the toolbar badge |
+| `content/bridge.ts` | ISOLATED world: relays config + rules + reveal commands, detection events, and NER requests |
+| `background/service-worker.ts` | Stores logs/stats, seeds + validates + serves rules YAML, updates the badge, routes NER to the host |
+| `background/offscreen.{html,ts}` | Chrome offscreen document hosting the transformers.js NER model (extension CSP, persistent) |
 | `ui/banner.ts` | In-page toast (createElement/textContent only) |
 | `popup/` | Popup: enable switch, **Reveal/Hide** button, stats, activity |
 | `options/` | Options: enable switch + **DPO YAML rules editor** (load/validate/save/reset) |
 
 **Detection pipeline:** `evaluate(prompt, rules)` runs built-in validated matchers + the DPO's `words`/`regex`/`combination` rules, drops whitelist spans, resolves overlaps, and returns findings + a **decision = most severe action** (`block > anonymize > warn`). Rules are authoritative — there is no global mode.
+
+**NER layer (v4.3):** when `GuardConfig.ner.enabled`, `main-world.ts` awaits an on-device NER pass after `evaluate()` and folds the entities into the same result via `mergeNerFindings()` (exact regex findings win overlaps; entities are filtered by per-group action/severity/confidence in `NerConfig`). The model (`@huggingface/transformers`, default `Xenova/bert-base-multilingual-cased-ner-hrl`) runs **once** in a persistent host — a Chrome **offscreen document** or, on Firefox (no offscreen API), the background script — selected at runtime by feature-detecting `chrome.offscreen`. Flow: `main-world` → `bridge` (`ner-request`) → service worker (`ner-detect`) → `detectViaHost()` → entities back. The ONNX WASM is bundled locally; model **weights** download once from the HuggingFace CDN (allowed via the `extension_pages` CSP) and are browser-cached. NER spans reuse the existing anonymizer/reveal path unchanged. ⚠️ Defaults to **on** for testing — gate or expose it before a public release (each NER inference adds latency on the send path and the first use downloads the model).
 
 **Rules:** stored as a YAML string in `chrome.storage.sync` (`guard_rules_yaml`); the bundled default seeds it on install. The service worker validates size + syntax on save; the bridge pushes the YAML to the MAIN world, which compiles and evaluates.
 

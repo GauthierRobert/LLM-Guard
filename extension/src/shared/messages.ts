@@ -12,20 +12,24 @@
 
 import type { Severity } from "./types";
 import type { RuleAction } from "@/core/rules/types";
+import { DEFAULT_NER_CONFIG, type NerConfig, type NerEntity } from "@/core/ner/types";
 
 /** Namespace tag on every window.postMessage payload, to filter page noise. */
 export const GUARD_NS = "__LLM_GUARD__" as const;
 
 /**
  * Master config. Behavior is decided by the DPO's rules, not a global mode —
- * this only carries the on/off switch.
+ * this carries the on/off switch and the NER-layer settings.
  */
 export interface GuardConfig {
   enabled: boolean;
+  /** On-device Named-Entity-Recognition layer (see core/ner). */
+  ner: NerConfig;
 }
 
 export const DEFAULT_CONFIG: GuardConfig = {
   enabled: true,
+  ner: DEFAULT_NER_CONFIG,
 };
 
 /** chrome.storage.sync key holding the GuardConfig. */
@@ -121,13 +125,29 @@ export interface RevealResultMessage {
   payload: { reveal: boolean; replaced: number; ok: boolean };
 }
 
+/** MAIN → ISOLATED: please run NER on this text (relayed to the SW/host). */
+export interface NerRequestMessage {
+  ns: typeof GUARD_NS;
+  kind: "ner-request";
+  payload: { id: string; text: string };
+}
+
+/** ISOLATED → MAIN: NER result for an earlier request id. */
+export interface NerResultMessage {
+  ns: typeof GUARD_NS;
+  kind: "ner-result";
+  payload: { id: string; entities: NerEntity[] };
+}
+
 export type GuardMessage =
   | DetectionMessage
   | ConfigRequestMessage
   | ConfigMessage
   | RulesMessage
   | RevealMessage
-  | RevealResultMessage;
+  | RevealResultMessage
+  | NerRequestMessage
+  | NerResultMessage;
 
 /** Type guard for window.postMessage handlers. */
 export function isGuardMessage(data: unknown): data is GuardMessage {
@@ -150,7 +170,11 @@ export type RuntimeMessage =
   | { kind: "reset-rules" }
   | { kind: "get-stats" }
   | { kind: "get-logs" }
-  | { kind: "clear-logs" };
+  | { kind: "clear-logs" }
+  | { kind: "ner-detect"; payload: { text: string } };
+
+/** Reply shape for ner-detect. */
+export type NerDetectResponse = { ok: boolean; entities: NerEntity[] };
 
 /** Reply shape for set-rules. */
 export type SetRulesResponse = { ok: true } | { ok: false; errors: string[] };

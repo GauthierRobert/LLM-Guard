@@ -1,6 +1,6 @@
 {
   "name": "llm-guard-extension",
-  "version": "4.2.0",
+  "version": "4.3.1",
   "private": true,
   "type": "module",
   "description": "LLM Guard v3 — Chrome extension (Manifest V3) that anonymizes or blocks PII in prompts sent to LLM services.",
@@ -12,7 +12,8 @@
     "build:firefox": "cross-env BROWSER=firefox vite build",
     "build:only": "vite build",
     "lint:firefox": "web-ext lint --source-dir=dist/firefox",
-    "package:firefox": "web-ext build --source-dir=dist/firefox --artifacts-dir=web-ext-artifacts --overwrite-dest",
+    "package:chrome": "web-ext build --source-dir=dist/chrome --artifacts-dir=web-ext-artifacts --filename=avopseudo-chrome-{version}.zip --overwrite-dest",
+    "package:firefox": "web-ext build --source-dir=dist/firefox --artifacts-dir=web-ext-artifacts --filename=avopseudo-firefox-{version}.zip --overwrite-dest",
     "source:firefox": "node -e \"require('fs').mkdirSync('web-ext-artifacts',{recursive:true})\" && tar -czf web-ext-artifacts/avopseudo-source.tar.gz src manifest.config.ts vite.config.ts vitest.config.ts tsconfig.json tsconfig.node.json eslint.config.js package.json package-lock.json RELEASE.md render-icons.mjs",
     "sign:firefox": "web-ext sign --source-dir=dist/firefox --artifacts-dir=web-ext-artifacts --channel=listed --amo-metadata=amo-metadata.json --upload-source-code=web-ext-artifacts/avopseudo-source.tar.gz",
     "release:firefox": "npm run build:firefox && npm run lint:firefox && npm run source:firefox && npm run sign:firefox",
@@ -43,6 +44,7 @@
     "web-ext": "^10.4.0"
   },
   "dependencies": {
+    "@huggingface/transformers": "^4.2.0",
     "js-yaml": "^4.1.1",
     "yaml": "^2.6.1"
   }

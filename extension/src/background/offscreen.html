@@ -1,0 +1,13 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <title>AvoPseudo NER worker</title>
+  </head>
+  <body>
+    <!-- Hidden offscreen document: hosts the transformers.js NER model so it
+         runs under the extension CSP with a persistent lifetime, off the
+         service worker. Driven entirely by chrome.runtime messages. -->
+    <script type="module" src="./offscreen.ts"></script>
+  </body>
+</html>

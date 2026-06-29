@@ -18,11 +18,13 @@ import {
   type DetectionAction,
   type DetectionEvent,
   type GuardConfig,
+  type NerDetectResponse,
   type RuntimeMessage,
   type SetRulesResponse,
 } from "@/shared/messages";
 import { DEFAULT_RULES_YAML } from "@/core/rules/defaults";
 import { validateRulesYaml } from "@/core/rules/parse";
+import { detectViaHost } from "@/core/ner/host";
 
 const BADGE_RED = "#dc2626";
 const BADGE_BLUE = "#2563eb";
@@ -55,7 +57,20 @@ function todayKey(ts: number): string {
 
 async function getConfig(): Promise<GuardConfig> {
   const stored = await chrome.storage.sync.get(CONFIG_STORAGE_KEY);
-  return (stored[CONFIG_STORAGE_KEY] as GuardConfig | undefined) ?? DEFAULT_CONFIG;
+  const raw = stored[CONFIG_STORAGE_KEY] as Partial<GuardConfig> | undefined;
+  // Merge defaults so configs saved before the NER layer existed still resolve.
+  return {
+    enabled: raw?.enabled ?? DEFAULT_CONFIG.enabled,
+    ner: raw?.ner ?? DEFAULT_CONFIG.ner,
+  };
+}
+
+/** Run NER for an intercepted prompt, using the configured model. */
+async function detectNer(text: string): Promise<NerDetectResponse> {
+  const { ner } = await getConfig();
+  if (!ner.enabled) return { ok: true, entities: [] };
+  const entities = await detectViaHost(text, ner.model);
+  return { ok: true, entities };
 }
 
 async function getRulesYaml(): Promise<string> {
@@ -261,6 +276,12 @@ chrome.runtime.onMessage.addListener(
           await clearBadge();
           sendResponse({ ok: true });
         })();
+        return true;
+
+      case "ner-detect":
+        void detectNer(message.payload.text)
+          .then(sendResponse)
+          .catch(() => sendResponse({ ok: false, entities: [] } satisfies NerDetectResponse));
         return true;
 
       default:

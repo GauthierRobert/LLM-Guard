@@ -19,6 +19,8 @@ import { compileRules } from "@/core/rules/compile";
 import { parseRulesYaml } from "@/core/rules/parse";
 import { getDefaultCompiledRules } from "@/core/rules/defaults";
 import type { CompiledRules, RuleFinding } from "@/core/rules/types";
+import { mergeNerFindings } from "@/core/ner/merge";
+import type { NerEntity } from "@/core/ner/types";
 import { findAdapter } from "@/adapters";
 import type { LLMAdapter } from "@/adapters/types";
 import { showBanner } from "@/ui/banner";
@@ -56,6 +58,12 @@ window.addEventListener("message", (event: MessageEvent) => {
     applyRules(data.payload.yaml);
   } else if (data.kind === "reveal") {
     handleReveal(data.payload.reveal);
+  } else if (data.kind === "ner-result") {
+    const pending = nerPending.get(data.payload.id);
+    if (pending) {
+      nerPending.delete(data.payload.id);
+      pending(data.payload.entities);
+    }
   }
 });
 
@@ -89,6 +97,35 @@ function handleReveal(reveal: boolean): void {
     },
     location.origin,
   );
+}
+
+/* --------------------------------- NER ----------------------------------- */
+
+/** In-flight NER requests, resolved when the ISOLATED bridge posts ner-result. */
+const nerPending = new Map<string, (entities: NerEntity[]) => void>();
+let nerSeq = 0;
+/** Cap how long the fetch waits on the model before sending without NER. */
+const NER_TIMEOUT_MS = 8000;
+
+/**
+ * Ask the bridge (→ service worker → offscreen/background host) to run NER on
+ * `text`. Resolves to [] on timeout or any failure so a slow/missing model can
+ * never hold up or break the user's request.
+ */
+function requestNer(text: string): Promise<NerEntity[]> {
+  return new Promise((resolve) => {
+    const id = `${Date.now()}-${nerSeq++}`;
+    let done = false;
+    const finish = (entities: NerEntity[]) => {
+      if (done) return;
+      done = true;
+      nerPending.delete(id);
+      resolve(entities);
+    };
+    nerPending.set(id, finish);
+    window.setTimeout(() => finish([]), NER_TIMEOUT_MS);
+    window.postMessage({ ns: GUARD_NS, kind: "ner-request", payload: { id, text } }, location.origin);
+  });
 }
 
 /* -------------------------------- helpers -------------------------------- */
@@ -202,7 +239,17 @@ window.fetch = async function patchedFetch(
     const prompts = adapter.extractPrompts(parsed);
     if (prompts.length === 0) return originalFetch(input, init);
 
-    const result = evaluate(prompts.join("\n"), rules);
+    const joined = prompts.join("\n");
+    let result = evaluate(joined, rules);
+
+    // Optional ML layer: detect names/orgs/places regex can't, merged into the
+    // same findings (regex wins overlaps). Awaiting here holds the send until
+    // the model answers (bounded by NER_TIMEOUT_MS).
+    if (config.ner?.enabled) {
+      const entities = await requestNer(joined);
+      result = mergeNerFindings(joined, result, entities, config.ner, rules.whitelist);
+    }
+
     if (result.findings.length === 0 || result.decision === null) {
       return originalFetch(input, init);
     }
