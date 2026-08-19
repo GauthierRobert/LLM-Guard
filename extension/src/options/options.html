@@ -23,7 +23,7 @@
             />
             <path
               fill="#fff"
-              d="m10.6 14.6-2.3-2.3 1.1-1.1 1.2 1.2 3.3-3.3 1.1 1.1-4.4 4.4Z"
+              d="M8.3 6.3h7.4a.7.7 0 0 1 0 1.4H8.3a.7.7 0 0 1 0-1.4ZM8.3 14.8h7.4a.7.7 0 0 1 0 1.4H8.3a.7.7 0 0 1 0-1.4ZM8.7 8.5h6.6L12 11.4ZM8.7 14.2h6.6L12 11.4ZM11.5 10.9h1v1.6h-1Z"
             />
           </svg>
           <h1>AvoPseudo</h1>
@@ -39,7 +39,8 @@
           <div class="row-text">
             <span class="row-title">Enable protection</span>
             <span class="row-sub"
-              >Scan prompts before they reach the LLM service.</span
+              >Master switch. Turn this off and AvoPseudo does nothing at
+              all.</span
             >
           </div>
           <label class="switch" title="Enable protection">
@@ -47,6 +48,63 @@
               type="checkbox"
               id="enabled"
               aria-label="Enable protection"
+            />
+            <span class="track" aria-hidden="true"></span>
+          </label>
+        </div>
+
+        <div class="row">
+          <div class="row-text">
+            <span class="row-title">Pseudonymise when I paste</span>
+            <span class="row-sub"
+              >Text pasted into a chat box (Ctrl/⌘+V, right-click Paste, paste
+              buttons) is checked and pseudonymised before it lands in the box.
+              A panel then tells you exactly what was replaced.</span
+            >
+          </div>
+          <label class="switch" title="Pseudonymise when I paste">
+            <input
+              type="checkbox"
+              id="paste-guard"
+              aria-label="Pseudonymise when I paste"
+            />
+            <span class="track" aria-hidden="true"></span>
+          </label>
+        </div>
+
+        <div class="row">
+          <div class="row-text">
+            <span class="row-title">Also check when I send (legacy)</span>
+            <span class="row-sub"
+              >Extra safety net that rewrites the prompt as it is sent, catching
+              sensitive data you typed rather than pasted. Off by default: the
+              change happens invisibly, after you have hit send.</span
+            >
+          </div>
+          <label class="switch" title="Also check when I send">
+            <input
+              type="checkbox"
+              id="guard-on-send"
+              aria-label="Also check when I send"
+            />
+            <span class="track" aria-hidden="true"></span>
+          </label>
+        </div>
+
+        <div class="row">
+          <div class="row-text">
+            <span class="row-title">On-device name detection</span>
+            <span class="row-sub"
+              >A small language model, running entirely in your browser, that
+              spots people and organisations no pattern can describe. It makes
+              each paste slower, and downloads the model once on first use.</span
+            >
+          </div>
+          <label class="switch" title="On-device name detection">
+            <input
+              type="checkbox"
+              id="ner-enabled"
+              aria-label="On-device name detection"
             />
             <span class="track" aria-hidden="true"></span>
           </label>
@@ -110,7 +168,7 @@
               id="whitelist-input"
               class="chip-input"
               type="text"
-              placeholder="e.g. example.com"
+              placeholder="e.g. mon-cabinet.be"
               aria-label="Add a value to never flag"
             />
             <button type="submit" class="btn btn-small btn-primary">Add</button>

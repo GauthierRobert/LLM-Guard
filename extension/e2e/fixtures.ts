@@ -22,7 +22,8 @@ import { dirname, resolve } from "node:path";
 import { readFileSync } from "node:fs";
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
-const EXTENSION_PATH = resolve(__dirname, "..", "dist");
+// Per-browser output dirs (BROWSER=chrome|firefox); Playwright drives Chrome.
+const EXTENSION_PATH = resolve(__dirname, "..", "dist", "chrome");
 const MOCK_HTML = readFileSync(resolve(__dirname, "mock-llm.html"), "utf8");
 
 /** The URL the extension treats as ChatGPT (matches manifest host globs). */
@@ -74,5 +75,32 @@ export const test = base.extend<{
     await use(extensionId);
   },
 });
+
+/**
+ * Overwrite the stored GuardConfig from inside the extension's own origin (the
+ * only place chrome.storage is reachable). Used to switch guards on or off for
+ * a spec — e.g. to exercise the opt-in send guard, or to take the on-device NER
+ * model out of the way so a paste resolves synchronously.
+ */
+export async function setGuardConfig(
+  context: BrowserContext,
+  extensionId: string,
+  patch: Record<string, unknown>,
+): Promise<void> {
+  const page = await context.newPage();
+  await page.goto(`chrome-extension://${extensionId}/src/options/options.html`);
+  await page.evaluate(async (p) => {
+    const KEY = "guard_config";
+    const api = (globalThis as unknown as { chrome: typeof chrome }).chrome;
+    const stored = (await api.storage.sync.get(KEY))[KEY] as Record<string, unknown> | undefined;
+    const next: Record<string, unknown> = { ...stored, ...p };
+    // `ner` is a nested object — merge it rather than replacing it wholesale.
+    if (p.ner) {
+      next.ner = { ...(stored?.ner as object | undefined), ...(p.ner as object) };
+    }
+    await api.storage.sync.set({ [KEY]: next });
+  }, patch);
+  await page.close();
+}
 
 export const expect = test.expect;

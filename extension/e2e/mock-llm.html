@@ -10,7 +10,36 @@
          A conversation area so the in-page reveal has something to scope to. -->
     <main>
       <div data-message-author-role="user" id="conversation"></div>
+      <!-- Two composer shapes, the way real apps have them: a plain textarea
+           and a contenteditable rich editor. The paste guard must handle both. -->
+      <textarea id="composer" rows="4" cols="60"></textarea>
+      <div id="rich" contenteditable="true"></div>
     </main>
+    <script>
+      // Paste `text` into a composer the way the browser would: a real
+      // ClipboardEvent carrying a DataTransfer. The extension's capture-phase
+      // listener sees it, runs the rules and writes the result back.
+      // Returns the composer's text once the guard has settled.
+      window.pasteInto = async function (selector, text) {
+        const el = document.querySelector(selector);
+        el.focus();
+        const data = new DataTransfer();
+        data.setData("text/plain", text);
+        el.dispatchEvent(
+          new ClipboardEvent("paste", {
+            clipboardData: data,
+            bubbles: true,
+            cancelable: true,
+          }),
+        );
+        return el;
+      };
+
+      window.composerText = function (selector) {
+        const el = document.querySelector(selector);
+        return "value" in el ? el.value : el.innerText;
+      };
+    </script>
     <script>
       // Send a prompt the way ChatGPT's web app does: POST JSON to a
       // /conversation endpoint. The extension's MAIN-world fetch patch sees it,

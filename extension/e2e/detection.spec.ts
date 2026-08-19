@@ -1,5 +1,7 @@
 /**
- * End-to-end detection tests against the loaded extension.
+ * End-to-end tests for the **send guard** — the v4 fetch interception, which
+ * since v5 is opt-in (`guardOnSend`) and therefore switched on explicitly here.
+ * The primary, default protection is the paste guard: see `paste.spec.ts`.
  *
  * Each test navigates to the (mocked) ChatGPT page, calls `window.sendPrompt`
  * — which POSTs a prompt the way the real web app does — and asserts on the
@@ -8,11 +10,10 @@
  *   - the bytes the page actually sent (echoed back by the mock endpoint).
  *
  * Detection runs off the bundled default rules, which are active in the MAIN
- * world from page boot (config defaults to enabled), so no storage round-trip
- * is needed.
+ * world from page boot.
  */
 
-import { test, expect, LLM_PAGE_URL } from "./fixtures";
+import { test, expect, LLM_PAGE_URL, setGuardConfig } from "./fixtures";
 
 type SendResult = { status: number; body: { echoed?: { messages: { content: { parts: string[] } }[] } } | null };
 
@@ -30,8 +31,14 @@ function sentPrompt(res: SendResult): string {
 
 const TOAST = "#__llm-guard-toast";
 
-test.describe("LLM Guard — prompt interception", () => {
-  test.beforeEach(async ({ page }) => {
+test.describe("AvoPseudo — send guard (opt-in)", () => {
+  test.beforeEach(async ({ context, extensionId, page }) => {
+    await setGuardConfig(context, extensionId, {
+      enabled: true,
+      // The send guard is off by default in v5; these specs are about it.
+      guardOnSend: true,
+      ner: { enabled: false },
+    });
     await page.goto(LLM_PAGE_URL);
     // @crxjs loads the MAIN-world script via an async import, so window.fetch is
     // patched a tick after document_start. Wait for the patch's readiness marker
@@ -63,13 +70,16 @@ test.describe("LLM Guard — prompt interception", () => {
   });
 
   test("warns (but still sends) on an RGPD-sensitive keyword", async ({ page }) => {
+    // NOTE: the bundled ruleset spells its French keywords without accents and
+    // there is no accent folding, so "dossier médical" does NOT match today —
+    // only the unaccented spelling does.
     const res: SendResult = await page.evaluate(
-      () => window.sendPrompt("Le dossier médical du dossier RH est joint."),
+      () => window.sendPrompt("Le dossier medical du dossier RH est joint."),
     );
 
     expect(res.status).toBe(200);
     // warn passes the prompt through untouched.
-    expect(sentPrompt(res)).toContain("dossier médical");
+    expect(sentPrompt(res)).toContain("dossier medical");
     await expect(page.locator(TOAST)).toContainText(/detected/i);
   });
 

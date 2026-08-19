@@ -66,6 +66,13 @@ function byId<T extends HTMLElement>(id: string): T {
 
 function reflectConfig(): void {
   byId<HTMLInputElement>("enabled").checked = config.enabled;
+  byId<HTMLInputElement>("paste-guard").checked = config.pasteGuard;
+  byId<HTMLInputElement>("guard-on-send").checked = config.guardOnSend;
+  byId<HTMLInputElement>("ner-enabled").checked = config.ner.enabled;
+  // Everything below is meaningless while the master switch is off.
+  for (const id of ["paste-guard", "guard-on-send", "ner-enabled"]) {
+    byId<HTMLInputElement>(id).disabled = !config.enabled;
+  }
 }
 
 function renderServices(): void {
@@ -426,8 +433,25 @@ function onUploadFile(file: File): void {
 }
 
 function wireControls(): void {
-  byId<HTMLInputElement>("enabled").addEventListener("change", (e) => {
-    config = { ...config, enabled: (e.target as HTMLInputElement).checked };
+  const toggles: Array<[string, keyof Pick<GuardConfig, "enabled" | "pasteGuard" | "guardOnSend">]> = [
+    ["enabled", "enabled"],
+    ["paste-guard", "pasteGuard"],
+    ["guard-on-send", "guardOnSend"],
+  ];
+  for (const [id, key] of toggles) {
+    byId<HTMLInputElement>(id).addEventListener("change", (e) => {
+      config = { ...config, [key]: (e.target as HTMLInputElement).checked };
+      void setConfig(config).catch(() => undefined);
+      reflectConfig();
+    });
+  }
+
+  // The NER switch lives one level down, inside the layer's own config.
+  byId<HTMLInputElement>("ner-enabled").addEventListener("change", (e) => {
+    config = {
+      ...config,
+      ner: { ...config.ner, enabled: (e.target as HTMLInputElement).checked },
+    };
     void setConfig(config).catch(() => undefined);
     reflectConfig();
   });

@@ -15,6 +15,7 @@ import {
   RULES_SEEDED_KEY,
   RULES_MAX_BYTES,
   STATS_STORAGE_KEY,
+  withConfigDefaults,
   type DetectionAction,
   type DetectionEvent,
   type GuardConfig,
@@ -27,7 +28,7 @@ import { validateRulesYaml } from "@/core/rules/parse";
 import { detectViaHost } from "@/core/ner/host";
 
 const BADGE_RED = "#dc2626";
-const BADGE_BLUE = "#2563eb";
+const BADGE_GREEN = "#0e9e85";
 const RESET_ALARM = "reset-badge";
 
 /** Aggregate, append-only counters. */
@@ -57,12 +58,9 @@ function todayKey(ts: number): string {
 
 async function getConfig(): Promise<GuardConfig> {
   const stored = await chrome.storage.sync.get(CONFIG_STORAGE_KEY);
-  const raw = stored[CONFIG_STORAGE_KEY] as Partial<GuardConfig> | undefined;
-  // Merge defaults so configs saved before the NER layer existed still resolve.
-  return {
-    enabled: raw?.enabled ?? DEFAULT_CONFIG.enabled,
-    ner: raw?.ner ?? DEFAULT_CONFIG.ner,
-  };
+  // Merge defaults so configs saved before the paste guard / NER layer existed
+  // still resolve to a complete config.
+  return withConfigDefaults(stored[CONFIG_STORAGE_KEY] as Partial<GuardConfig> | undefined);
 }
 
 /** Run NER for an intercepted prompt, using the configured model. */
@@ -121,7 +119,7 @@ async function refreshBadge(stats: GuardStats): Promise<void> {
   const handled = today.anonymized + today.blocked;
   await chrome.action.setBadgeText({ text: handled > 0 ? String(handled) : "" });
   await chrome.action.setBadgeBackgroundColor({
-    color: today.blocked > 0 ? BADGE_RED : BADGE_BLUE,
+    color: today.blocked > 0 ? BADGE_RED : BADGE_GREEN,
   });
 }
 

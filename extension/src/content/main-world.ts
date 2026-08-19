@@ -1,16 +1,22 @@
 /**
  * MAIN-world content script (document_start).
  *
- * Monkey-patches window.fetch to intercept LLM chat/completion requests and,
- * according to the DPO's YAML rules, anonymize / block / warn on detected
- * sensitive data. Each rule carries its own action; the per-request decision is
- * the most severe action among the matches (block > anonymize > warn).
+ * Hosts the two guards, the shared detection state (config, compiled rules, the
+ * session anonymizer) and the NER round-trip to the ISOLATED bridge:
  *
- * Anonymization is reversible but de-anonymization is MANUAL: the response is
- * left with placeholders, and the popup's reveal button restores the real
- * values in the page on demand. This sits on the hot path of every fetch, so we
- * early-exit cheaply and wrap everything in try/catch — the page must never
- * break.
+ *   - **paste guard** (v5, default): pseudonymises sensitive text the moment it
+ *     is pasted into the chat composer, and says so in a branded in-page panel.
+ *     See `content/paste-guard.ts`.
+ *   - **send guard** (v4 behaviour, opt-in via `config.guardOnSend`): patches
+ *     window.fetch and rewrites the outgoing prompt instead.
+ *
+ * Each rule carries its own action; the decision is the most severe match
+ * (block > anonymize > warn). Anonymization is reversible but de-anonymization
+ * is MANUAL: placeholders stay in the page and the popup's reveal button
+ * restores the real values on demand.
+ *
+ * The fetch patch sits on the hot path of every request, so we early-exit
+ * cheaply and wrap everything in try/catch — the page must never break.
  */
 
 import { Anonymizer } from "@/core/anonymizer";
@@ -25,12 +31,14 @@ import { findAdapter } from "@/adapters";
 import type { LLMAdapter } from "@/adapters/types";
 import { showBanner } from "@/ui/banner";
 import { hideInPage, isRevealed, revealInPage } from "@/content/reveal";
+import { installPasteGuard } from "@/content/paste-guard";
 import {
   DEFAULT_CONFIG,
   GUARD_NS,
   isGuardMessage,
   type DetectionAction,
   type DetectionEvent,
+  type DetectionSource,
   type FindingSummary,
   type GuardConfig,
 } from "@/shared/messages";
@@ -110,9 +118,10 @@ const NER_TIMEOUT_MS = 8000;
 /**
  * Ask the bridge (→ service worker → offscreen/background host) to run NER on
  * `text`. Resolves to [] on timeout or any failure so a slow/missing model can
- * never hold up or break the user's request.
+ * never hold up or break the user's request. The paste path passes a shorter
+ * timeout than the send path — a paste has to feel instant.
  */
-function requestNer(text: string): Promise<NerEntity[]> {
+function requestNer(text: string, timeoutMs: number = NER_TIMEOUT_MS): Promise<NerEntity[]> {
   return new Promise((resolve) => {
     const id = `${Date.now()}-${nerSeq++}`;
     let done = false;
@@ -123,7 +132,7 @@ function requestNer(text: string): Promise<NerEntity[]> {
       resolve(entities);
     };
     nerPending.set(id, finish);
-    window.setTimeout(() => finish([]), NER_TIMEOUT_MS);
+    window.setTimeout(() => finish([]), timeoutMs);
     window.postMessage({ ns: GUARD_NS, kind: "ner-request", payload: { id, text } }, location.origin);
   });
 }
@@ -162,6 +171,7 @@ function emitDetection(
   action: DetectionAction,
   findings: FindingSummary[],
   total: number,
+  source: DetectionSource,
 ): void {
   const payload: DetectionEvent = {
     service,
@@ -169,9 +179,20 @@ function emitDetection(
     action,
     findings,
     total,
+    source,
     ts: Date.now(),
   };
   window.postMessage({ ns: GUARD_NS, kind: "detection", payload }, location.origin);
+}
+
+/** Summarise raw findings and emit them in one step. */
+function emitFindings(
+  action: DetectionAction,
+  findings: RuleFinding[],
+  source: DetectionSource,
+): void {
+  const { summaries } = summarize(findings);
+  emitDetection(adapter?.id ?? location.hostname, action, summaries, findings.length, source);
 }
 
 function blockedResponse(): Response {
@@ -205,14 +226,27 @@ function anonymizeSpansFor(text: string, findings: RuleFinding[]): AnonymizeSpan
   return spans.sort((a, b) => a.start - b.start);
 }
 
-/* ------------------------------ fetch patch ------------------------------ */
+/* ------------------------------ paste guard ------------------------------ */
 
+// The v5 primary guard: catch sensitive text as it is pasted into the composer.
+installPasteGuard({
+  getConfig: () => config,
+  getRules: () => rules,
+  anonymizer,
+  requestNer,
+  emit: (action, findings) => emitFindings(action, findings, "paste"),
+});
+
+/* --------------------- send guard (fetch patch, opt-in) ------------------- */
+
+// Installed unconditionally so it is in place before the page captures fetch,
+// but inert unless the user turns `guardOnSend` on: v5 protects at paste time.
 window.fetch = async function patchedFetch(
   input: RequestInfo | URL,
   init?: RequestInit,
 ): Promise<Response> {
   try {
-    if (!config.enabled) return originalFetch(input, init);
+    if (!config.enabled || !config.guardOnSend) return originalFetch(input, init);
     if (!adapter) return originalFetch(input, init);
 
     const url = resolveUrl(input);
@@ -259,13 +293,13 @@ window.fetch = async function patchedFetch(
 
     if (result.decision === "block") {
       showBanner({ message: "Blocked — sensitive data detected", tone: "danger" });
-      emitDetection(adapter.id, "blocked", summaries, total);
+      emitDetection(adapter.id, "blocked", summaries, total, "send");
       return blockedResponse();
     }
 
     if (result.decision === "warn") {
       showBanner({ message: "Sensitive data detected in your prompt", tone: "warn" });
-      emitDetection(adapter.id, "warned", summaries, total);
+      emitDetection(adapter.id, "warned", summaries, total, "send");
       return originalFetch(input, init);
     }
 
@@ -285,7 +319,7 @@ window.fetch = async function patchedFetch(
       message: "Sensitive data anonymized — reveal from the popup",
       tone: "info",
     });
-    emitDetection(adapter.id, "anonymized", summaries, total);
+    emitDetection(adapter.id, "anonymized", summaries, total, "send");
     void highest;
     return response;
   } catch {

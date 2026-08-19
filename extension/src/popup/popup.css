@@ -1,6 +1,6 @@
 :root {
-  --brand: #2563eb;
-  --brand-weak: #dbeafe;
+  --brand: #0e9e85;
+  --brand-weak: #d7f2ec;
   --bg: #ffffff;
   --surface: #f8fafc;
   --surface-2: #f1f5f9;
@@ -9,8 +9,8 @@
   --text-muted: #64748b;
   --radius: 10px;
 
-  --action-anonymized: #2563eb;
-  --action-anonymized-bg: #dbeafe;
+  --action-anonymized: #0e9e85;
+  --action-anonymized-bg: #d7f2ec;
   --action-blocked: #dc2626;
   --action-blocked-bg: #fee2e2;
   --action-warned: #d97706;
@@ -21,8 +21,8 @@
 
 @media (prefers-color-scheme: dark) {
   :root {
-    --brand: #3b82f6;
-    --brand-weak: #1e3a5f;
+    --brand: #14b89c;
+    --brand-weak: #0f3d34;
     --bg: #0f172a;
     --surface: #1e293b;
     --surface-2: #273449;
@@ -30,7 +30,8 @@
     --text: #f1f5f9;
     --text-muted: #94a3b8;
 
-    --action-anonymized-bg: #1e3a5f;
+    --action-anonymized: #14b89c;
+    --action-anonymized-bg: #0f3d34;
     --action-blocked-bg: #4c1d1d;
     --action-warned-bg: #4a3410;
     --action-clean-bg: #334155;
@@ -148,6 +149,36 @@ main {
   gap: 16px;
 }
 
+/* How it works — the paste-time promise, stated up front */
+.how {
+  margin: 0;
+  padding: 10px 12px;
+  border: 1px solid var(--border);
+  border-left: 3px solid var(--brand);
+  border-radius: var(--radius);
+  background: var(--surface);
+}
+
+.how-text {
+  margin: 0;
+  font-size: 12px;
+  line-height: 1.45;
+  color: var(--text-muted);
+}
+
+.how-text strong {
+  color: var(--text);
+}
+
+.how-tag {
+  font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  font-size: 11px;
+  color: var(--brand);
+  background: var(--brand-weak);
+  border-radius: 4px;
+  padding: 1px 4px;
+}
+
 /* Segmented control */
 .reveal {
   margin: 0;
@@ -229,6 +260,17 @@ main {
 
 .activity-service {
   font-weight: 600;
+}
+
+.activity-source {
+  font-size: 10.5px;
+  font-weight: 600;
+  color: var(--text-muted);
+  background: var(--surface-2);
+  border: 1px solid var(--border);
+  border-radius: 999px;
+  padding: 1px 6px;
+  white-space: nowrap;
 }
 
 .activity-time {

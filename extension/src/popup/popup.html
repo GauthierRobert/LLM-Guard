@@ -22,7 +22,7 @@
           />
           <path
             fill="#fff"
-            d="m10.6 14.6-2.3-2.3 1.1-1.1 1.2 1.2 3.3-3.3 1.1 1.1-4.4 4.4Z"
+            d="M8.3 6.3h7.4a.7.7 0 0 1 0 1.4H8.3a.7.7 0 0 1 0-1.4ZM8.3 14.8h7.4a.7.7 0 0 1 0 1.4H8.3a.7.7 0 0 1 0-1.4ZM8.7 8.5h6.6L12 11.4ZM8.7 14.2h6.6L12 11.4ZM11.5 10.9h1v1.6h-1Z"
           />
         </svg>
         <h1 class="title">AvoPseudo</h1>
@@ -34,12 +34,20 @@
     </header>
 
     <main>
+      <section class="how" aria-label="How AvoPseudo protects you">
+        <p class="how-text">
+          Text you <strong>paste</strong> into a chat box is pseudonymised on
+          the spot. Tags like <code class="how-tag">[NAME_1a2b]</code> are
+          written by AvoPseudo — never by you or the AI.
+        </p>
+      </section>
+
       <section class="reveal" aria-label="Reveal anonymized values">
         <button type="button" id="reveal-toggle" class="reveal-btn">
           Reveal real values
         </button>
         <p class="reveal-hint" id="reveal-hint">
-          Behavior is set by your organization's rules.
+          Swaps AvoPseudo's tags back to the real values, in this page only.
         </p>
       </section>
 

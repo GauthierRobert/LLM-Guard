@@ -15,19 +15,12 @@ import {
   GUARD_NS,
   RULES_STORAGE_KEY,
   isGuardMessage,
+  withConfigDefaults as withDefaults,
   type GuardConfig,
   type NerDetectResponse,
   type RevealResponse,
   type TabMessage,
 } from "@/shared/messages";
-
-/** Merge a possibly-old stored config with defaults so new keys (e.g. ner) exist. */
-function withDefaults(raw: Partial<GuardConfig> | undefined): GuardConfig {
-  return {
-    enabled: raw?.enabled ?? DEFAULT_CONFIG.enabled,
-    ner: raw?.ner ?? DEFAULT_CONFIG.ner,
-  };
-}
 
 async function readConfig(): Promise<GuardConfig> {
   try {

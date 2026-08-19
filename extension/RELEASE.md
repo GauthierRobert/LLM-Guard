@@ -77,6 +77,58 @@ warnings are advisory (e.g. `data_collection_permissions` is consumed only on Fi
 
 ## Chrome — Chrome Web Store
 
-1. `npm run build:chrome` → `dist/chrome`.
-2. Zip the **contents** of `dist/chrome` (manifest.json at the zip root).
-3. Upload at <https://chrome.google.com/webstore/devconsole> ($5 one-time dev fee).
+### Build the package
+
+```bash
+npm run build:chrome      # → dist/chrome
+npm run package:chrome    # → web-ext-artifacts/avopseudo-chrome-<version>.zip
+```
+
+`package:chrome` zips the **contents** of `dist/chrome`, so `manifest.json` lands
+at the zip root — the Web Store rejects a zip with a wrapping folder. Check it:
+
+```bash
+unzip -l web-ext-artifacts/avopseudo-chrome-*.zip | head
+```
+
+### Upload
+
+1. Bump `version` in `package.json` **first** — the manifest version derives from
+   it, and the Web Store refuses a version that is not strictly higher than the
+   published one. There is no way to reuse or roll back a version number.
+2. <https://chrome.google.com/webstore/devconsole> → the **AvoPseudo** item.
+3. **Package** → *Upload new package* → the zip → **Save draft**.
+4. Walk the **Store listing**, **Privacy** and **Distribution** tabs — see below.
+5. **Submit for review**. Review is typically hours-to-days; it is slower when
+   permissions changed or the package is large (ours is ~19 MB zipped / ~78 MB
+   unpacked, almost entirely the four ONNX WASM runtime variants under `ort/`).
+
+### What must be re-checked on every submission
+
+- **Store listing** — the description, screenshots and promo images are separate
+  from `manifest.description`. Uploading a package does **not** update them.
+  Screenshots showing an older UI are the most common thing to forget.
+- **Privacy tab** — single-purpose statement, a justification per permission,
+  the "remote code" answer, and the data-usage certification. Google requires
+  the certification to be re-affirmed each time, even when nothing changed.
+- **Privacy policy URL** — `docs/privacy-policy.html`, served from GitHub Pages.
+  It must describe what the extension actually does *in the version you are
+  submitting*.
+
+### Answers that apply to this extension
+
+| Question | Answer | Why |
+|---|---|---|
+| Remote code? | **No** | All JS/WASM ships in the package; `ort/` is bundled precisely so nothing executable is fetched at runtime. |
+| Collects user data? | **No** | Prompts, detected values, logs and stats never leave `chrome.storage.local`. |
+| Outbound network? | Model **weights** only | With the on-device NER layer enabled, `@huggingface/transformers` downloads model weights from `huggingface.co` / `*.hf.co` on first use (see `content_security_policy.extension_pages`). Data, not code — but it *is* a third-party request that exposes the user's IP, so the privacy policy must say so. |
+
+### Permissions, and how to justify them
+
+| Permission | Justification |
+|---|---|
+| `storage` | Stores the detection rules, settings, and the local activity log. |
+| `alarms` | Daily reset of the toolbar badge counter. |
+| `scripting` | Re-injects the content-script bridge into already-open tabs after an update, so protection resumes without a manual reload. |
+| `offscreen` | Hosts the on-device NER model outside the service worker (which cannot run WASM persistently). |
+| Host permissions (the LLM hostnames) | Read and pseudonymise text pasted into those chat composers. |

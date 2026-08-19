@@ -1,9 +1,9 @@
 {
   "name": "llm-guard-extension",
-  "version": "4.3.1",
+  "version": "5.0.0",
   "private": true,
   "type": "module",
-  "description": "LLM Guard v3 — Chrome extension (Manifest V3) that anonymizes or blocks PII in prompts sent to LLM services.",
+  "description": "LLM Guard v5 — cross-browser extension (Manifest V3) that pseudonymises personal data the moment it is pasted into an LLM chat.",
   "scripts": {
     "dev": "vite",
     "dev:firefox": "cross-env BROWSER=firefox vite",

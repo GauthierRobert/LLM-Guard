@@ -31,7 +31,7 @@ export default defineManifest({
   name: "AvoPseudo",
   version: pkg.version,
   description:
-    "Pseudonymises or blocks personal & sensitive data in prompts sent to ChatGPT, Claude, Gemini, Copilot and more.",
+    "Pseudonymises personal & sensitive data the moment you paste it into ChatGPT, Claude, Gemini, Copilot and more.",
   icons: {
     16: "src/assets/icon-16.png",
     48: "src/assets/icon-48.png",
@@ -70,7 +70,8 @@ export default defineManifest({
   },
   content_scripts: [
     {
-      // MAIN world: monkey-patches window.fetch to intercept prompts.
+      // MAIN world: intercepts pastes into the chat composer (and, when the
+      // user opts in, patches window.fetch to also guard the send).
       matches: LLM_HOST_GLOBS,
       js: ["src/content/main-world.ts"],
       run_at: "document_start",

@@ -55,21 +55,7 @@ export function looksLikeJwt(s: string): boolean {
   }
 }
 
-/**
- * True if the email's domain is RFC-2606 reserved
- * (example.com/net/org, or ends with .example/.test/.invalid/.localhost).
- */
-export function isReservedExampleEmail(s: string): boolean {
-  const at = s.lastIndexOf("@");
-  if (at === -1) return false;
-  const domain = s.slice(at + 1).toLowerCase();
-  if (domain === "example.com" || domain === "example.net" || domain === "example.org") {
-    return true;
-  }
-  return (
-    domain.endsWith(".example") ||
-    domain.endsWith(".test") ||
-    domain.endsWith(".invalid") ||
-    domain.endsWith(".localhost")
-  );
-}
+// NOTE: there is deliberately no "reserved example domain" exemption here.
+// example.com / .org / .net and friends are pseudonymised like any other
+// address — an exemption would make every test prompt look clean and hide the
+// protection from whoever is trying it out.

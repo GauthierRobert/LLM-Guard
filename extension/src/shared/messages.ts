@@ -19,18 +19,45 @@ export const GUARD_NS = "__LLM_GUARD__" as const;
 
 /**
  * Master config. Behavior is decided by the DPO's rules, not a global mode —
- * this carries the on/off switch and the NER-layer settings.
+ * this carries the on/off switch, where the guard hooks in, and the NER-layer
+ * settings.
  */
 export interface GuardConfig {
   enabled: boolean;
+  /**
+   * v5 primary guard: pseudonymise text the moment it is pasted into a chat
+   * composer (Ctrl/⌘+V, right-click Paste, on-screen paste buttons).
+   */
+  pasteGuard: boolean;
+  /**
+   * v4 behaviour, kept as an opt-in safety net: also scan the prompt when it is
+   * sent, by intercepting the outgoing request. Off by default — the paste
+   * guard is the one users see and understand.
+   */
+  guardOnSend: boolean;
   /** On-device Named-Entity-Recognition layer (see core/ner). */
   ner: NerConfig;
 }
 
 export const DEFAULT_CONFIG: GuardConfig = {
   enabled: true,
+  pasteGuard: true,
+  guardOnSend: false,
   ner: DEFAULT_NER_CONFIG,
 };
+
+/**
+ * Fill in any key missing from a stored config (older installs predate
+ * `pasteGuard` / `guardOnSend` / `ner`). Shared by every context that reads it.
+ */
+export function withConfigDefaults(raw: Partial<GuardConfig> | undefined): GuardConfig {
+  return {
+    enabled: raw?.enabled ?? DEFAULT_CONFIG.enabled,
+    pasteGuard: raw?.pasteGuard ?? DEFAULT_CONFIG.pasteGuard,
+    guardOnSend: raw?.guardOnSend ?? DEFAULT_CONFIG.guardOnSend,
+    ner: raw?.ner ?? DEFAULT_CONFIG.ner,
+  };
+}
 
 /** chrome.storage.sync key holding the GuardConfig. */
 export const CONFIG_STORAGE_KEY = "guard_config" as const;
@@ -69,7 +96,10 @@ export interface FindingSummary {
   count: number;
 }
 
-/** Emitted by the MAIN world whenever a prompt is intercepted. */
+/** Where the guard caught the data. */
+export type DetectionSource = "paste" | "send";
+
+/** Emitted by the MAIN world whenever text is intercepted. */
 export interface DetectionEvent {
   /** LLM service id, e.g. "chatgpt". */
   service: string;
@@ -77,8 +107,10 @@ export interface DetectionEvent {
   host: string;
   action: DetectionAction;
   findings: FindingSummary[];
-  /** Total sensitive values handled in this request. */
+  /** Total sensitive values handled. */
   total: number;
+  /** Absent on events recorded before v5 (all of which were "send"). */
+  source?: DetectionSource;
   ts: number;
 }
 

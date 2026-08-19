@@ -26,3 +26,20 @@ describe("false-positive regression (lowercase French prose)", () => {
     expect(res.findings.some((f) => f.value.includes("Meridian"))).toBe(true);
   });
 });
+
+// The RFC-2606 example domains used to sit in the default whitelist, which made
+// every test prompt look clean and hid the protection from the person trying it.
+describe("example domains are not exempt", () => {
+  const r = getDefaultCompiledRules();
+
+  it.each(["a@example.com", "a@example.org", "a@example.net"])(
+    "pseudonymises %s like any other address",
+    (address) => {
+      const res = evaluate(`Ecrivez a ${address} pour confirmer.`, r);
+      const email = res.findings.find((f) => f.value === address);
+      expect(email).toBeDefined();
+      expect(email!.action).toBe("anonymize");
+      expect(email!.placeholderLabel).toBe("EMAIL");
+    },
+  );
+});

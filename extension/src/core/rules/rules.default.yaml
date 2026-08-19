@@ -70,11 +70,9 @@ defaults:
   severity: medium
 
 whitelist:
-  - "support@example.com"
-  - "contact@example.com"
-  - "example.com"
-  - "example.org"
-  - "example.net"
+  # Les domaines d'exemple (example.com/.org/.net) NE sont PAS exemptes : une
+  # adresse de test doit se pseudonymiser comme une vraie, sinon on ne peut pas
+  # verifier que la protection fonctionne.
   - "127.0.0.1"
   - "0.0.0.0"
   - "255.255.255.0"

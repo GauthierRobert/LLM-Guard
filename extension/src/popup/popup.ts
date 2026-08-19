@@ -78,12 +78,18 @@ function renderActivityRow(event: DetectionEvent): HTMLLIElement {
   badge.className = `badge badge-${event.action}`;
   badge.textContent = ACTION_LABEL[event.action];
 
+  // Where we caught it. Events logged before v5 have no source and were all
+  // caught at send time.
+  const source = document.createElement("span");
+  source.className = "activity-source";
+  source.textContent = event.source === "paste" ? "on paste" : "on send";
+
   const time = document.createElement("time");
   time.className = "activity-time";
   time.dateTime = new Date(event.ts).toISOString();
   time.textContent = relativeTime(event.ts);
 
-  top.append(service, badge, time);
+  top.append(service, badge, source, time);
 
   const findings = document.createElement("p");
   findings.className = "activity-findings";
@@ -140,7 +146,7 @@ function wireControls(): void {
         reflectReveal();
         hint.textContent = revealed
           ? `Showing ${res.replaced} real value${res.replaced === 1 ? "" : "s"} in the page.`
-          : "Behavior is set by your organization's rules.";
+          : "Swaps AvoPseudo's tags back to the real values, in this page only.";
       })
       .finally(() => {
         revealBtn.disabled = false;

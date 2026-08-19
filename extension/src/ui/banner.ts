@@ -9,8 +9,10 @@
 type Tone = "info" | "warn" | "danger";
 
 const CONTAINER_ID = "__llm-guard-toast";
+// Brand teal-green for informational toasts (logo #0E9E85, lightened for the
+// dark toast surface); warn/amber and danger/red keep their conventional meaning.
 const ACCENT: Record<Tone, string> = {
-  info: "#2563eb",
+  info: "#14b89c",
   warn: "#d97706",
   danger: "#dc2626",
 };

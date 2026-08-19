@@ -1,28 +1,58 @@
-# LLM Guard — Chrome Extension (v3)
+# AvoPseudo — browser extension (v5)
 
-A Manifest V3 Chrome extension that protects personal & sensitive data in prompts
-sent to LLM web apps. It intercepts outgoing requests and acts on them according
-to **rules your DPO writes in plain YAML**. Every rule declares its own action:
+A Manifest V3 extension (Chrome + Firefox) that protects personal & sensitive
+data in LLM web apps — **at the moment you paste it**.
 
-- **Anonymize** — replace the detected value with a reversible `[LABEL_xxxx]`
-  placeholder before the request leaves the browser. The model never sees the
-  raw data. The response keeps the placeholders; you reveal the real values
-  **manually** with a button in the popup (see below).
-- **Warn** — notify you, but send the prompt unchanged.
-- **Block** — refuse to send the prompt at all (returns a local 403).
+When you paste into a chat composer (Ctrl/⌘+V, right-click *Paste*, or a paste
+button), AvoPseudo reads the clipboard text, checks it against **rules your DPO
+writes in plain YAML**, and acts *before the text reaches the box*. Every rule
+declares its own action:
 
-When a prompt triggers several rules, the **most severe action wins**
+- **Anonymize** — the value is replaced with a reversible `[LABEL_xxxx]`
+  placeholder as it is pasted. What you see in the box is already pseudonymised,
+  so the model can never see the raw data — not even if you send by accident.
+- **Warn** — the text is pasted unchanged, with a warning.
+- **Block** — nothing is pasted at all.
+
+When a paste triggers several rules, the **most severe action wins**
 (`block > anonymize > warn`).
 
 All processing is local. No data leaves the browser.
 
+## You always know it was us
+
+The whole point of pseudonymising in the composer is that the change is visible
+*before* you send — so it has to be unmistakably attributable. Every time
+AvoPseudo steps in, a branded panel appears next to the chat box and says so:
+
+- it carries the AvoPseudo shield and the words **"You are reading a message
+  from your AvoPseudo extension — not from this website, and not from the AI"**;
+- it states that the `[LABEL_xxxx]` tags now in the box **were written by the
+  extension**, not by you and not by the model;
+- it lists every value that was replaced — masked, with a *Show originals*
+  toggle — next to the placeholder that replaced it;
+- it offers **Undo — paste my original** if you disagree;
+- the composer itself flashes an outline so your eye goes to what changed.
+
+The panel lives in a **shadow root** and is styled entirely through the CSSOM,
+so no host page CSS can restyle it and no page Content-Security-Policy can
+suppress it.
+
 ## Manual reveal
 
-Anonymization is reversible but **never automatic**. After a prompt is
-anonymized, the LLM's answer comes back containing placeholders like
-`[EMAIL_a1b2c3]`. Click **Reveal real values** in the popup to swap them for the
+Anonymization is reversible but **never automatic**. The conversation keeps the
+placeholders — `[EMAIL_a1b2c3]` and friends — in your messages and in the
+model's answers. Click **Reveal real values** in the popup to swap them for the
 real values directly in the page; click again to **Hide** them. The
 placeholder→value map lives only in the page's memory for that session.
+
+## Guarding the send as well (optional)
+
+Pasting is where sensitive data realistically enters a prompt, but text you
+*type* never passes through the paste guard. **Settings → Also check when I send**
+turns the v4 behaviour back on: the outgoing request is intercepted and rewritten
+too. It is **off by default**, because that rewrite happens invisibly, after you
+have already hit send.
 
 ## DPO rules (YAML)
 
@@ -84,28 +114,48 @@ Modules communicate through typed contracts in `src/shared/`.
 
 ```bash
 npm install
-npm run dev      # dev build with HMR → load ./dist unpacked
-npm run build    # typecheck + production build → ./dist
-npm test         # unit tests
-npm run lint     # eslint
+npm run dev          # dev build with HMR (Chrome)  → dist/chrome
+npm run dev:firefox  # dev build (Firefox)          → dist/firefox
+npm run build        # typecheck + both production packages
+npm test             # unit tests
+npm run lint         # eslint
 ```
 
-Load it: `chrome://extensions` → enable **Developer mode** → **Load unpacked** →
-select the `dist/` folder. Reload your LLM tab after building.
+Load it in Chrome: `chrome://extensions` → enable **Developer mode** →
+**Load unpacked** → select `dist/chrome`. In Firefox:
+`about:debugging#/runtime/this-firefox` → **Load Temporary Add-on** →
+`dist/firefox/manifest.json`. Reload your LLM tab after building.
 
 ## How it works
 
 ```
- MAIN world (content/main-world.ts)            ISOLATED world (content/bridge.ts)
- ─ patches window.fetch                          ─ serves config + rules YAML
- ─ findAdapter(host) → matchEndpoint(url)        ─ relays detections → SW
- ─ evaluate(prompt, rules) → decision   ⇄ postMessage ⇄   reveal commands → MAIN
- ─ block → 403 | warn → pass | anonymize spans              │ chrome.runtime
- ─ reveal/hide real values in the page                      ▼
- (content/reveal.ts)                            background/service-worker.ts
-                                                ─ logs, stats, badge
+ MAIN world (content/*)                        ISOLATED world (content/bridge.ts)
+ ─ paste-guard.ts: capture-phase `paste`         ─ serves config + rules YAML
+ ─ evaluate(pasted text, rules) [+ NER]          ─ relays detections → SW
+ ─ paste-plan.ts → outcome + text        ⇄ postMessage ⇄  reveal commands → MAIN
+ ─ composer.ts writes it into the box                       │ chrome.runtime
+ ─ ui/paste-notice.ts explains what we did                  ▼
+ ─ reveal/hide real values (reveal.ts)          background/service-worker.ts
+ ─ opt-in: window.fetch patch (send guard)      ─ logs, stats, badge
                                                 ─ seeds + validates + serves rules
 ```
+
+### The paste path
+
+1. A capture-phase `paste` listener reads `clipboardData` `text/plain` and
+   resolves the composer — `<textarea>` *or* a ProseMirror/Lexical-style
+   `contenteditable`, found generically, with no per-site selector.
+2. `evaluate()` runs on the pasted text itself, so the finding offsets apply
+   directly.
+3. If nothing is found (and the ML layer is off) the guard **stands aside** and
+   lets the browser do its own, higher-fidelity native paste.
+4. Otherwise it takes the event over — `preventDefault()` **plus**
+   `stopImmediatePropagation()`, because rich editors handle `paste` themselves
+   and would otherwise insert the text a second time — and writes the planned
+   text back: `execCommand("insertText")` for rich editors (they observe it
+   exactly like a keystroke), the native value setter + an `input` event for
+   text fields (so React's value tracker notices).
+5. The notice panel reports what changed; **Undo** puts the original back.
 
 ### Detection
 
@@ -119,7 +169,7 @@ select the `dist/` folder. Reload your LLM tab after building.
    non-overlapping set (longest span wins, ties by rule order).
 5. Map to findings and pick the **decision** (most severe action).
 
-### Anonymization
+### Pseudonymisation
 
 `core/anonymizer.ts` `anonymizeSpans()` walks the caller-supplied spans
 left-to-right, minting stable `[LABEL_<fnv1a6>]` placeholders (same value → same
@@ -134,18 +184,24 @@ src/
 ├── shared/        # types.ts (contracts), messages.ts (wire protocol + storage keys)
 ├── core/
 │   ├── rules/     # rules.default.yaml + types/schema/parse/compile/engine/defaults
+│   ├── ner/       # optional on-device entity model (types/merge/engine/host)
 │   ├── match.ts   # generic overlap resolver
 │   ├── validators.ts
 │   └── anonymizer.ts
 ├── adapters/      # one LLMAdapter per service (+ conversationSelector) + registry
-├── content/       # main-world.ts (MAIN), reveal.ts (MAIN), bridge.ts (ISOLATED)
-├── background/    # service-worker.ts
-├── ui/            # banner.ts (in-page toast)
+├── content/       # MAIN: paste-guard, paste-plan, composer, main-world, reveal
+│                  # ISOLATED: bridge.ts
+├── background/    # service-worker.ts (+ offscreen NER host)
+├── ui/            # paste-notice.ts (the branded panel), banner.ts (toast)
 ├── popup/         # enable switch, reveal button, recent activity
-└── options/       # enable switch + DPO YAML rules editor
+└── options/       # guard switches + DPO YAML rules editor
 ```
 
 ## Add a new LLM service
+
+Adding the host globs to `manifest.config.ts` is enough for the paste guard —
+it finds the composer generically. An adapter additionally gives the service a
+name in the activity log, a reveal scope, and send-guard support:
 
 1. Create `src/adapters/<service>.ts` implementing `LLMAdapter`
    (`hostnames`, `matchEndpoint`, `extractPrompts`, `injectPrompts`,

@@ -1,10 +1,5 @@
 import { describe, it, expect } from "vitest";
-import {
-  luhnCheck,
-  isValidIPv4,
-  looksLikeJwt,
-  isReservedExampleEmail,
-} from "./validators";
+import { luhnCheck, isValidIPv4, looksLikeJwt } from "./validators";
 
 describe("luhnCheck", () => {
   it("accepts a valid card number", () => {
@@ -51,15 +46,3 @@ describe("looksLikeJwt", () => {
   });
 });
 
-describe("isReservedExampleEmail", () => {
-  it("flags RFC-2606 reserved domains", () => {
-    expect(isReservedExampleEmail("a@example.com")).toBe(true);
-    expect(isReservedExampleEmail("a@example.org")).toBe(true);
-    expect(isReservedExampleEmail("a@foo.test")).toBe(true);
-    expect(isReservedExampleEmail("a@host.localhost")).toBe(true);
-  });
-  it("does not flag real domains", () => {
-    expect(isReservedExampleEmail("a@gmail.com")).toBe(false);
-    expect(isReservedExampleEmail("a@company.fr")).toBe(false);
-  });
-});

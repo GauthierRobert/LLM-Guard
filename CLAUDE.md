@@ -2,9 +2,13 @@
 
 This file provides guidance to Claude Code (claude.ai/code) when working with code in this repository.
 
-## Project Overview (v3 — current)
+## Project Overview (v5 — current)
 
-**LLM Guard v3** is a clean-room rewrite of the Chrome extension (Manifest V3) in **TypeScript**, bundled with **Vite + `@crxjs/vite-plugin`** and tested with **Vitest**. It intercepts prompts sent to LLM services and, according to **DPO-authored YAML rules**, either **anonymizes** sensitive data with reversible `[LABEL_xxxx]` placeholders, **warns**, or **blocks** the request — **each rule declares its own action**. Anonymization is reversible but de-anonymization is **manual**: the response keeps the placeholders and a **popup button** reveals/hides the real values directly in the page.
+**LLM Guard v5** is a clean-room rewrite of the extension (Manifest V3) in **TypeScript**, bundled with **Vite + `@crxjs/vite-plugin`** and tested with **Vitest**. It guards sensitive data **at paste time**: when the user pastes into an LLM chat composer (Ctrl/⌘+V, right-click Paste, on-screen paste buttons), the text is evaluated against **DPO-authored YAML rules** and, per rule action, **pseudonymised** with reversible `[LABEL_xxxx]` placeholders before it ever lands in the box, **warned** about, or **blocked** (nothing is pasted) — **each rule declares its own action**. De-anonymization is **manual**: placeholders stay in the page and a **popup button** reveals/hides the real values.
+
+**The user always sees who did it.** Every intervention raises a branded, shadow-DOM panel anchored to the composer stating, in words, that the message comes from the AvoPseudo extension — *not* from the website and *not* from the AI — that the `[LABEL_xxxx]` tags were written by the extension, and exactly which values were replaced (masked, with a "show originals" toggle). It offers an **Undo — paste my original** action. See `ui/paste-notice.ts`.
+
+The v4 send-time interception (patching `window.fetch` and rewriting the outgoing request) is retained as an **opt-in safety net** for typed-not-pasted data: `GuardConfig.guardOnSend`, **off by default**.
 
 The new extension lives entirely under **`extension/`**. The previous vanilla-JS v2 (4-layer engine, telemetry, company rules) is archived under **`legacy/`** for reference. The self-hosted backend/dashboard (`api-java/`, `dashboard/`, `infra/`, `shared/`) are unchanged.
 
@@ -45,7 +49,7 @@ fixed in `manifest.config.ts` and must not change after the first submission.
 | Path | Role |
 |------|------|
 | `shared/types.ts` | Domain contracts: `Severity`, `AnonymizeSpan`, `IAnonymizer` |
-| `shared/messages.ts` | Cross-context messaging + `GuardConfig` (`enabled` + `ner`) + rules/reveal/NER messages + storage keys |
+| `shared/messages.ts` | Cross-context messaging + `GuardConfig` (`enabled`, `pasteGuard`, `guardOnSend`, `ner`) + `withConfigDefaults()` + rules/reveal/NER messages + storage keys |
 | `core/rules/rules.default.yaml` | Bundled, DPO-readable default rules (imported via Vite `?raw`) |
 | `core/rules/{types,schema,parse,compile,engine,defaults}.ts` | YAML rule model → validate → compile to regex matchers → `evaluate(text)` |
 | `core/match.ts` | Generic `resolveOverlaps()` — collapses overlapping spans into one non-overlapping set |
@@ -53,7 +57,11 @@ fixed in `manifest.config.ts` and must not change after the first submission.
 | `core/anonymizer.ts` | `Anonymizer`: `anonymizeSpans()` (reversible `[LABEL_xxxx]`), `deanonymize()`, `exportMap()` |
 | `core/ner/{types,merge,engine,host}.ts` | **NER layer (v4.3)**: `NerConfig` + `mergeNerFindings()` (pure, merges model entities into the rules result, regex wins overlaps), transformers.js `detectEntities()`, and the cross-browser `detectViaHost()` |
 | `adapters/*.ts` | Per-service request shapers + optional `conversationSelector` (reveal scope), implementing `LLMAdapter` |
-| `content/main-world.ts` | MAIN world: patches `window.fetch`, runs `evaluate()`, awaits NER, anonymizes anonymize-action spans, handles reveal |
+| `content/paste-guard.ts` | **MAIN world, v5 primary guard**: capture-phase `paste` listener → `evaluate()` (+ NER) → `planPaste()` → insert + notify |
+| `content/paste-plan.ts` | Pure decision step: `planPaste(text, result, anonymizer)` → outcome, text to insert, per-value replacement list. No DOM |
+| `content/composer.ts` | DOM plumbing for the chat box: `findComposer`, `insertText`, `setComposerText`, `replaceInComposer`, selection snapshots. Handles both `<textarea>` and ProseMirror/Lexical-style `contenteditable` |
+| `ui/paste-notice.ts` | The branded shadow-DOM panel + composer pulse + "checking…" pill. All CSSOM styling (no `<style>`, no inline attrs → immune to page CSP) |
+| `content/main-world.ts` | MAIN world: shared state (config, rules, anonymizer), NER round-trip, reveal, installs the paste guard, and hosts the opt-in fetch patch |
 | `content/reveal.ts` | MAIN world: in-page reveal/hide of real values (TreeWalker, marker spans, React-safe) |
 | `content/bridge.ts` | ISOLATED world: relays config + rules + reveal commands, detection events, and NER requests |
 | `background/service-worker.ts` | Stores logs/stats, seeds + validates + serves rules YAML, updates the badge, routes NER to the host |
@@ -62,13 +70,15 @@ fixed in `manifest.config.ts` and must not change after the first submission.
 | `popup/` | Popup: enable switch, **Reveal/Hide** button, stats, activity |
 | `options/` | Options: enable switch + **DPO YAML rules editor** (load/validate/save/reset) |
 
-**Detection pipeline:** `evaluate(prompt, rules)` runs built-in validated matchers + the DPO's `words`/`regex`/`combination` rules, drops whitelist spans, resolves overlaps, and returns findings + a **decision = most severe action** (`block > anonymize > warn`). Rules are authoritative — there is no global mode.
+**Detection pipeline:** `evaluate(text, rules)` runs built-in validated matchers + the DPO's `words`/`regex`/`combination` rules, drops whitelist spans, resolves overlaps, and returns findings + a **decision = most severe action** (`block > anonymize > warn`). Rules are authoritative — there is no global mode.
 
-**NER layer (v4.3):** when `GuardConfig.ner.enabled`, `main-world.ts` awaits an on-device NER pass after `evaluate()` and folds the entities into the same result via `mergeNerFindings()` (exact regex findings win overlaps; entities are filtered by per-group action/severity/confidence in `NerConfig`). The model (`@huggingface/transformers`, default `Xenova/bert-base-multilingual-cased-ner-hrl`) runs **once** in a persistent host — a Chrome **offscreen document** or, on Firefox (no offscreen API), the background script — selected at runtime by feature-detecting `chrome.offscreen`. Flow: `main-world` → `bridge` (`ner-request`) → service worker (`ner-detect`) → `detectViaHost()` → entities back. The ONNX WASM is bundled locally; model **weights** download once from the HuggingFace CDN (allowed via the `extension_pages` CSP) and are browser-cached. NER spans reuse the existing anonymizer/reveal path unchanged. ⚠️ Defaults to **on** for testing — gate or expose it before a public release (each NER inference adds latency on the send path and the first use downloads the model).
+**Paste pipeline (v5):** the capture-phase listener in `paste-guard.ts` reads `clipboardData` `text/plain`, resolves the composer (`findComposer`), and runs `evaluate()` on the pasted text — whose offsets therefore apply directly, no re-finding by value. With NER off and **nothing found**, the guard stands aside so the browser performs its own higher-fidelity native paste. Otherwise it calls `preventDefault()` **and `stopImmediatePropagation()`** — essential, because ProseMirror/Lexical handle `paste` themselves and would otherwise insert the text a second time — then `planPaste()` decides and `insertText()` writes. Rich editors are written via `document.execCommand("insertText")` so they observe it exactly like a keystroke (Range-splice fallback); text fields via the native value setter + an `input` event, so React's value tracker sees the change. When NER is enabled the paste must be claimed *before* the model answers, so the guard always `preventDefault()`s, shows a "checking…" pill, snapshots the selection, awaits (short **3 s** budget vs 8 s on the send path), restores the caret and then inserts.
+
+**NER layer (v4.3):** when `GuardConfig.ner.enabled`, both guards await an on-device NER pass after `evaluate()` and fold the entities into the same result via `mergeNerFindings()` (exact regex findings win overlaps; entities are filtered by per-group action/severity/confidence in `NerConfig`). The model (`@huggingface/transformers`, default `Xenova/bert-base-multilingual-cased-ner-hrl`) runs **once** in a persistent host — a Chrome **offscreen document** or, on Firefox (no offscreen API), the background script — selected at runtime by feature-detecting `chrome.offscreen`. Flow: `main-world` → `bridge` (`ner-request`) → service worker (`ner-detect`) → `detectViaHost()` → entities back. The ONNX WASM is bundled locally; model **weights** download once from the HuggingFace CDN (allowed via the `extension_pages` CSP) and are browser-cached. NER spans reuse the existing anonymizer/reveal path unchanged. ⚠️ Defaults to **on** for testing — gate or expose it before a public release (each NER inference adds latency on the paste path and the first use downloads the model).
 
 **Rules:** stored as a YAML string in `chrome.storage.sync` (`guard_rules_yaml`); the bundled default seeds it on install. The service worker validates size + syntax on save; the bridge pushes the YAML to the MAIN world, which compiles and evaluates.
 
-**Adding an LLM:** add an adapter in `extension/src/adapters/` (implement `LLMAdapter`, optionally set `conversationSelector`), register it in `adapters/index.ts`, and add the hostname globs to `extension/manifest.config.ts`.
+**Adding an LLM:** add the hostname globs to `extension/manifest.config.ts` — that alone is enough for the paste guard, which finds the composer generically (`findComposer`) and needs no per-site selector. An adapter in `extension/src/adapters/` (implement `LLMAdapter`, register in `adapters/index.ts`) is still what gives the service a name in the activity log, a `conversationSelector` scoping the manual reveal, and support for the opt-in send guard.
 
 **Editing detection rules:** change `extension/src/core/rules/rules.default.yaml` (the bundled default) or, at runtime, the Options-page YAML editor. Options-page saves apply live to open LLM tabs (validated — parse **and** compile — by the service worker, pushed via `storage.onChanged`). Changes to the bundled default require a rebuild + extension reload; on update the service worker re-seeds storage with the new default **only if** the stored rules were never customized (tracked via `guard_rules_seeded_yaml`), and re-injects the bridge into already-open LLM tabs so the rules feed survives the reload.
 
