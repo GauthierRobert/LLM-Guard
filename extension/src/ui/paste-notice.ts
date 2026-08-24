@@ -244,38 +244,41 @@ function anchorContainer(anchor: Element | null | undefined): HTMLElement | null
   return null;
 }
 
-/**
- * Lay the host as a zero-height strip exactly over the composer's top edge,
- * in `container`'s coordinates. The card inside then hangs off that strip's
- * bottom-right corner — i.e. just above the composer, right-aligned to it.
- *
- * Offsets for an absolutely positioned box are measured from its containing
- * block's *padding* box, in that block's own unscrolled coordinates — hence the
- * `clientLeft`/`clientTop` (border) and `scrollLeft`/`scrollTop` corrections.
- */
-function anchorTo(host: HTMLElement, container: HTMLElement, anchor: HTMLElement): boolean {
+/** Viewport room above the composer's visible box — how tall a card may grow. */
+function roomAbove(container: HTMLElement): number {
   try {
-    const c = container.getBoundingClientRect();
-    const a = anchor.getBoundingClientRect();
-    if (a.width === 0 && a.height === 0) return false;
-    host.style.left = `${a.left - c.left - container.clientLeft + container.scrollLeft}px`;
-    host.style.top = `${a.top - c.top - container.clientTop + container.scrollTop}px`;
-    host.style.width = `${a.width}px`;
-    return true;
-  } catch {
-    return false;
-  }
-}
-
-/** Viewport room above the composer — how tall an anchored card may grow. */
-function roomAbove(anchor: Element | null | undefined): number {
-  try {
-    const r = anchor?.getBoundingClientRect();
-    if (!r || (r.width === 0 && r.height === 0)) return 0;
-    return r.top - GAP - MARGIN;
+    return container.getBoundingClientRect().top - GAP - MARGIN;
   } catch {
     return 0;
   }
+}
+
+/**
+ * Resolve where a card needing `needs` pixels of headroom should hang from, or
+ * null to fall back to the viewport corner.
+ *
+ * Note this deliberately never measures the *editor* element. A rich composer is
+ * an editor inside a `max-height` scroller, so the moment a paste overflows that
+ * scroller the editor's own box grows past its frame and its
+ * `getBoundingClientRect().top` becomes `frame.top - scrollTop` — hundreds of
+ * pixels above the visible box, off the top of the screen for a long paste.
+ * Anchoring to that element is what put the card far above the composer, made it
+ * appear to scroll with the box's *inner* scroll, and finally hid it entirely.
+ * The container is the box the user actually sees, and it does not move.
+ */
+function anchorFor(anchor: Element | null | undefined, needs: number): HTMLElement | null {
+  const container = anchorContainer(anchor);
+  if (!container) return null;
+  try {
+    const r = container.getBoundingClientRect();
+    // Walked too far up to still be "the composer": hanging a card on the top
+    // edge of some page-sized wrapper would point at nothing.
+    if (r.width === 0 || r.height === 0 || r.height > window.innerHeight * 0.6) return null;
+    if (r.top - GAP - MARGIN < needs) return null;
+  } catch {
+    return null;
+  }
+  return container;
 }
 
 interface Mount {
@@ -290,9 +293,10 @@ interface Mount {
  * cannot reach them; the host itself now sits in the page's own tree when
  * anchored, so its own box is reset defensively against inherited page rules.
  *
- * Pass the composer to anchor to it; pass nothing to pin to the viewport.
+ * Pass a container (from `anchorFor`) to hang the card off its top edge; pass
+ * nothing to pin to the viewport corner.
  */
-function createHost(id: string, anchor?: Element | null): Mount | null {
+function createHost(id: string, container?: HTMLElement | null): Mount | null {
   const fallbackRoot = mountRoot();
   if (!fallbackRoot) return null;
   removeById(id);
@@ -317,16 +321,20 @@ function createHost(id: string, anchor?: Element | null): Mount | null {
   host.id = id;
   const shadow = host.attachShadow({ mode: "open" });
 
-  const container = anchorContainer(anchor);
   let placement: Placement = "pinned";
-  if (container && anchor instanceof HTMLElement) {
+  if (container) {
+    // A zero-height strip stretched across the container's top edge. Pure CSS —
+    // nothing is measured, so there is nothing to recompute on scroll or resize
+    // and nothing that can drift out of step with the box.
     host.style.position = "absolute";
-    host.style.right = "auto";
+    host.style.left = "0";
+    host.style.right = "0";
+    host.style.top = "0";
     host.style.bottom = "auto";
+    host.style.width = "auto";
     host.style.height = "0";
     container.appendChild(host);
-    if (anchorTo(host, container, anchor)) placement = "anchored";
-    else host.remove();
+    placement = "anchored";
   }
   if (placement === "pinned") {
     host.style.position = "fixed";
@@ -459,13 +467,13 @@ function openFullNotice(opts: PasteNoticeOptions, showOriginals = false): void {
 
     // The panel is tall, so unlike the badge it only hangs over the composer
     // when there is real room above it — otherwise it would run off the top of
-    // the screen. This is decided once, when the panel opens, and never
-    // revisited: a side that can change under the user is what made the old
-    // placement feel broken.
-    const room = roomAbove(opts.anchor);
-    const anchored = room >= 300;
+    // the screen. Decided once, when the panel opens, and never revisited: a
+    // side that can change under the user is what made the old placement feel
+    // broken.
+    const container = anchorFor(opts.anchor, 300);
+    const room = container ? roomAbove(container) : 0;
 
-    const mounted = createHost(HOST_ID, anchored ? opts.anchor : null);
+    const mounted = createHost(HOST_ID, container);
     if (!mounted) return;
     const { box } = mounted;
 
@@ -967,58 +975,28 @@ let badgeWatchers: (() => void) | null = null;
  * happen to it in that time:
  *
  *  - **its subject leaves.** See `stillInComposer`.
- *  - **the composer resizes.** Scrolling no longer moves the badge (it rides
- *    in the composer's own container), but the offset between the container
- *    and the box does change when the box grows, so re-measure on resize.
  *  - **the site takes our node.** An anchored host lives in the page's own
  *    tree, and a React re-render of that subtree can carry it off. Put it back
  *    rather than silently losing the user's only route to the originals.
  *
+ * Its *position* needs no watching at all: the host is a CSS strip across its
+ * container's top edge, so scrolls, resizes and a growing composer are all the
+ * browser's problem.
+ *
  * Returns the function that unwires it.
  */
 function watchBadge(mounted: Mount, opts: PasteNoticeOptions): () => void {
-  const { host, placement } = mounted;
-  const anchor = opts.anchor;
-  const container = placement === "anchored" ? host.parentElement : null;
-  const live = container !== null && anchor instanceof HTMLElement;
-
-  let frame = 0;
-  const remeasure = (): void => {
-    if (!live || frame !== 0) return;
-    frame = requestAnimationFrame(() => {
-      frame = 0;
-      if (host.isConnected) anchorTo(host, container, anchor as HTMLElement);
-    });
-  };
-
-  let sizeObserver: ResizeObserver | null = null;
-  try {
-    if (live && typeof ResizeObserver === "function") {
-      sizeObserver = new ResizeObserver(remeasure);
-      sizeObserver.observe(anchor as HTMLElement);
-      sizeObserver.observe(container);
-    }
-  } catch {
-    sizeObserver = null;
-  }
+  const { host } = mounted;
 
   const staleTimer = window.setInterval(() => {
     if (!stillInComposer(opts)) {
       hidePasteBadge();
       return;
     }
-    if (!host.isConnected) {
-      showPasteBadge(opts);
-      return;
-    }
-    remeasure();
+    if (!host.isConnected) showPasteBadge(opts);
   }, BADGE_STALE_CHECK_MS);
 
-  return () => {
-    window.clearInterval(staleTimer);
-    sizeObserver?.disconnect();
-    if (frame !== 0) cancelAnimationFrame(frame);
-  };
+  return () => window.clearInterval(staleTimer);
 }
 
 /**
@@ -1040,7 +1018,8 @@ export function showPasteBadge(opts: PasteNoticeOptions): void {
 
     const p = palette();
     const accent = accentFor(opts.outcome, p);
-    const mounted = createHost(BADGE_ID, opts.anchor);
+    // One line tall — it needs only enough headroom to clear the composer.
+    const mounted = createHost(BADGE_ID, anchorFor(opts.anchor, 44));
     if (!mounted) return;
     const { box } = mounted;
 
@@ -1150,7 +1129,7 @@ export function showPastePending(anchor?: Element | null): void {
     const p = palette();
     // Same spot the badge will take, so the pill visibly turns into the result
     // rather than jumping across the screen.
-    const mounted = createHost(PENDING_ID, anchor);
+    const mounted = createHost(PENDING_ID, anchorFor(anchor, 44));
     if (!mounted) return;
 
     const pill = make("div", {

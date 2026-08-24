@@ -8,7 +8,9 @@
     <!-- Stands in for a real LLM web app. The content scripts inject here
          because the test serves this page under a matched host (chatgpt.com).
          A conversation area so the in-page reveal has something to scope to. -->
-    <main>
+    <!-- Headroom above the composers, as any real chat page has: the review
+         card hangs over the top edge of the box and needs somewhere to go. -->
+    <main style="padding-top: 220px">
       <div data-message-author-role="user" id="conversation"></div>
       <!-- Two composer shapes, the way real apps have them: a plain textarea
            and a contenteditable rich editor. The paste guard must handle both.
@@ -20,6 +22,23 @@
       </div>
       <div class="composer-wrap" style="position: relative">
         <div id="rich" contenteditable="true"></div>
+      </div>
+      <!-- ChatGPT's real composer ancestry, measured off the live site: the
+           editor sits inside a max-height scroller, wrapped in a clipping
+           surface, inside a `position: relative` shell. It is that shell the
+           badge must hang from — the editor element itself grows past its
+           scroller on a long paste, so its own box ends up far above the box
+           the user can actually see. -->
+      <div id="gpt-shell" style="position: relative; width: 460px">
+        <div style="overflow: clip; contain: inline-size">
+          <div style="min-width: 0; padding: 4px">
+            <div style="overflow-x: hidden; overflow-y: auto">
+              <div style="max-height: 120px; overflow: auto">
+                <div id="gptish" contenteditable="true"></div>
+              </div>
+            </div>
+          </div>
+        </div>
       </div>
     </main>
     <script>

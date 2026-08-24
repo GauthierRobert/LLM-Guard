@@ -65,22 +65,19 @@ async function openReviewBadge(page: import("@playwright/test").Page): Promise<v
 }
 
 /**
- * Where the badge sits relative to the composer it belongs to. The host itself
- * is a zero-height strip laid over the composer's top edge — the visible pill
- * hangs off it inside the shadow root, so that is what we measure.
+ * Where the badge sits relative to the box it hangs from. The host itself is a
+ * zero-height strip across that box's top edge — the visible pill hangs off it
+ * inside the shadow root, so that is what we measure.
  */
 async function badgeOffsets(
   page: import("@playwright/test").Page,
 ): Promise<{ gap: number; right: number }> {
-  return page.evaluate(
-    ({ badge, composer }) => {
-      const pill = document.querySelector(badge)!.shadowRoot!.firstElementChild!;
-      const b = pill.getBoundingClientRect();
-      const c = document.querySelector(composer)!.getBoundingClientRect();
-      return { gap: Math.round(c.top - b.bottom), right: Math.round(c.right - b.right) };
-    },
-    { badge: BADGE, composer: TEXTAREA },
-  );
+  return page.evaluate((badge) => {
+    const host = document.querySelector(badge)!;
+    const b = host.shadowRoot!.firstElementChild!.getBoundingClientRect();
+    const c = host.parentElement!.getBoundingClientRect();
+    return { gap: Math.round(c.top - b.bottom), right: Math.round(c.right - b.right) };
+  }, BADGE);
 }
 
 test.describe("AvoPseudo — paste interception", () => {
@@ -328,6 +325,60 @@ test.describe("AvoPseudo — paste interception", () => {
     await expect.poll(() => composerBottom()).not.toBe(bottomBefore);
 
     await expect.poll(() => badgeOffsets(page)).toEqual(before);
+  });
+
+  test("a paste that overflows a ChatGPT-shaped composer still shows the badge", async ({
+    page,
+  }) => {
+    // The regression that hid the card completely. ChatGPT's editor lives in a
+    // max-height scroller: once a paste overflows it, the editor element's own
+    // box extends past its frame and getBoundingClientRect().top becomes
+    // `frame.top - scrollTop` — hundreds of pixels above the visible composer,
+    // and off the top of the screen entirely for a long paste. Anchoring to
+    // that element put the badge there with it.
+    await page.setViewportSize({ width: 900, height: 700 });
+    await page.evaluate(() => {
+      const shell = document.querySelector("#gpt-shell") as HTMLElement;
+      Object.assign(shell.style, { position: "fixed", left: "60px", bottom: "40px" });
+    });
+
+    const long = Array.from(
+      { length: 40 },
+      (_, i) => `Ligne ${i}: Sophie Lemaire, sophie.lemaire@lemaire-avocats.be`,
+    ).join("\n");
+    await page.evaluate((text) => window.pasteInto("#gptish", text), long);
+
+    await expect(page.locator(BADGE)).toHaveCount(1);
+
+    const geometry = await page.evaluate(
+      ({ badge }) => {
+        // A real editor scrolls the caret into view after inserting, which is
+        // the state the user was in: composer scrolled, its own box hanging
+        // well above the frame.
+        const scroller = document.querySelector("#gptish")!.parentElement!;
+        scroller.scrollTop = scroller.scrollHeight;
+
+        const host = document.querySelector(badge)!;
+        const pill = host.shadowRoot!.firstElementChild!.getBoundingClientRect();
+        const editor = document.querySelector("#gptish")!.getBoundingClientRect();
+        const shell = document.querySelector("#gpt-shell")!.getBoundingClientRect();
+        return {
+          scrollTop: Math.round(scroller.scrollTop),
+          editorTop: Math.round(editor.top),
+          shellTop: Math.round(shell.top),
+          gapToShell: Math.round(shell.top - pill.bottom),
+          onScreen: pill.top >= 0 && pill.bottom <= 700 && pill.left >= 0 && pill.right <= 900,
+        };
+      },
+      { badge: BADGE },
+    );
+
+    // The editor really did overflow and slide up out of its frame...
+    expect(geometry.scrollTop).toBeGreaterThan(200);
+    expect(geometry.editorTop).toBeLessThan(geometry.shellTop - 200);
+    // ...but the badge tracks the visible shell, so it stays put and on screen.
+    expect(geometry.gapToShell).toBe(10);
+    expect(geometry.onScreen).toBe(true);
   });
 
   test("the badge goes away once the pseudonymised text leaves the box", async ({ page }) => {
