@@ -11,9 +11,16 @@
     <main>
       <div data-message-author-role="user" id="conversation"></div>
       <!-- Two composer shapes, the way real apps have them: a plain textarea
-           and a contenteditable rich editor. The paste guard must handle both. -->
-      <textarea id="composer" rows="4" cols="60"></textarea>
-      <div id="rich" contenteditable="true"></div>
+           and a contenteditable rich editor. The paste guard must handle both.
+           Each sits in a positioned wrapper, as every real composer does — that
+           wrapper is what the review badge hangs itself from, so that it rides
+           with the box instead of with the viewport. -->
+      <div class="composer-wrap" style="position: relative">
+        <textarea id="composer" rows="4" cols="60"></textarea>
+      </div>
+      <div class="composer-wrap" style="position: relative">
+        <div id="rich" contenteditable="true"></div>
+      </div>
     </main>
     <script>
       // Paste `text` into a composer the way the browser would: a real

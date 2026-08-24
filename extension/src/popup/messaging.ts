@@ -6,6 +6,7 @@ import type {
   DetectionEvent,
   GuardConfig,
   RevealResponse,
+  RevealStatusResponse,
   RuntimeMessage,
   SetRulesResponse,
 } from "@/shared/messages";
@@ -70,6 +71,34 @@ export function sendReveal(reveal: boolean): Promise<RevealResponse> {
         }
         resolve(response);
       });
+    });
+  });
+}
+
+/**
+ * Ask the active tab's content script whether the page is currently showing
+ * real values. The popup document is rebuilt from scratch every time it is
+ * opened, so it has no memory of a prior reveal — it must ask the page.
+ */
+export function getRevealStatus(): Promise<RevealStatusResponse> {
+  return new Promise<RevealStatusResponse>((resolve) => {
+    chrome.tabs.query({ active: true, currentWindow: true }, (tabs) => {
+      const tabId = tabs[0]?.id;
+      if (tabId === undefined) {
+        resolve({ ok: false, reveal: false });
+        return;
+      }
+      chrome.tabs.sendMessage(
+        tabId,
+        { kind: "reveal-status" },
+        (response: RevealStatusResponse) => {
+          if (chrome.runtime.lastError || !response) {
+            resolve({ ok: false, reveal: false });
+            return;
+          }
+          resolve(response);
+        },
+      );
     });
   });
 }

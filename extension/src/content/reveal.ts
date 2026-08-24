@@ -147,6 +147,20 @@ export function isRevealed(): boolean {
   return revealed;
 }
 
+/**
+ * How many values are currently swapped in inside the page. `isRevealed()` can
+ * be true with a count of zero — the user revealed while every placeholder was
+ * still in the composer, which reveal never touches — and callers need to tell
+ * those two states apart.
+ */
+export function revealedCount(): number {
+  try {
+    return document.querySelectorAll(`[${MARKER_ATTR}]`).length;
+  } catch {
+    return 0;
+  }
+}
+
 /** Reset internal state (used when the placeholder map is cleared/tests). */
 export function resetRevealState(): void {
   revealed = false;

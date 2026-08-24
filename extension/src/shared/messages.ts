@@ -154,7 +154,34 @@ export interface RevealMessage {
 export interface RevealResultMessage {
   ns: typeof GUARD_NS;
   kind: "reveal-result";
-  payload: { reveal: boolean; replaced: number; ok: boolean };
+  payload: {
+    reveal: boolean;
+    replaced: number;
+    /**
+     * The values were shown in the paste review panel rather than in the page:
+     * they are still in the composer, unsent, and reveal never rewrites that.
+     * The popup says so, otherwise "showing 2 real values" points at nothing.
+     */
+    panel?: boolean;
+    ok: boolean;
+  };
+}
+
+/**
+ * ISOLATED → MAIN: the popup just (re)opened and needs the current reveal
+ * state — a fresh popup document always starts with no idea whether the page
+ * is currently showing real values, so it must ask instead of assuming.
+ */
+export interface RevealStatusRequestMessage {
+  ns: typeof GUARD_NS;
+  kind: "reveal-status-request";
+}
+
+/** MAIN → ISOLATED: answer to reveal-status-request. */
+export interface RevealStatusMessage {
+  ns: typeof GUARD_NS;
+  kind: "reveal-status";
+  payload: { reveal: boolean };
 }
 
 /** MAIN → ISOLATED: please run NER on this text (relayed to the SW/host). */
@@ -178,6 +205,8 @@ export type GuardMessage =
   | RulesMessage
   | RevealMessage
   | RevealResultMessage
+  | RevealStatusRequestMessage
+  | RevealStatusMessage
   | NerRequestMessage
   | NerResultMessage;
 
@@ -214,10 +243,19 @@ export type SetRulesResponse = { ok: true } | { ok: false; errors: string[] };
 /* --------------------- tab messages (popup → content) --------------------- */
 
 /** popup → active tab (received by the ISOLATED bridge). */
-export type TabMessage = { kind: "reveal"; reveal: boolean };
+export type TabMessage = { kind: "reveal"; reveal: boolean } | { kind: "reveal-status" };
 
 /** Reply shape for the reveal tab message. */
-export type RevealResponse = { ok: boolean; reveal: boolean; replaced: number };
+export type RevealResponse = {
+  ok: boolean;
+  reveal: boolean;
+  replaced: number;
+  /** Values shown in the in-page paste panel (unsent composer text). */
+  panel?: boolean;
+};
+
+/** Reply shape for the reveal-status tab message. */
+export type RevealStatusResponse = { ok: boolean; reveal: boolean };
 
 /** Re-export so callers don't reach into core for the action union. */
 export type { RuleAction };

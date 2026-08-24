@@ -19,6 +19,7 @@ import {
   type GuardConfig,
   type NerDetectResponse,
   type RevealResponse,
+  type RevealStatusResponse,
   type TabMessage,
 } from "@/shared/messages";
 
@@ -83,6 +84,8 @@ function relayNer(id: string, text: string): void {
 
 // Pending reveal request awaiting MAIN's result, so we can answer the popup.
 let pendingReveal: ((r: RevealResponse) => void) | null = null;
+// Pending reveal-status query awaiting MAIN's answer.
+let pendingRevealStatus: ((r: RevealStatusResponse) => void) | null = null;
 
 window.addEventListener("message", (event: MessageEvent) => {
   if (event.source !== window) return;
@@ -106,8 +109,14 @@ window.addEventListener("message", (event: MessageEvent) => {
         ok: data.payload.ok,
         reveal: data.payload.reveal,
         replaced: data.payload.replaced,
+        panel: data.payload.panel === true,
       });
       pendingReveal = null;
+    }
+  } else if (data.kind === "reveal-status") {
+    if (pendingRevealStatus) {
+      pendingRevealStatus({ ok: true, reveal: data.payload.reveal });
+      pendingRevealStatus = null;
     }
   }
 });
@@ -126,6 +135,18 @@ chrome.runtime.onMessage.addListener(
         if (pendingReveal === sendResponse) {
           pendingReveal({ ok: false, reveal: false, replaced: 0 });
           pendingReveal = null;
+        }
+      }, 3000);
+      return true; // async response
+    }
+    if (message?.kind === "reveal-status") {
+      if (pendingRevealStatus) pendingRevealStatus({ ok: false, reveal: false });
+      pendingRevealStatus = sendResponse;
+      post({ ns: GUARD_NS, kind: "reveal-status-request" });
+      setTimeout(() => {
+        if (pendingRevealStatus === sendResponse) {
+          pendingRevealStatus({ ok: false, reveal: false });
+          pendingRevealStatus = null;
         }
       }, 3000);
       return true; // async response

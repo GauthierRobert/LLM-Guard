@@ -19,9 +19,16 @@ import type { PasteOutcome, PasteReplacement } from "@/content/paste-plan";
 
 const HOST_ID = "__avopseudo-paste-notice";
 const PENDING_ID = "__avopseudo-paste-pending";
-const PULSE_ID = "__avopseudo-composer-pulse";
+const BADGE_ID = "__avopseudo-paste-badge";
 
 const AUTO_DISMISS_MS = 18_000;
+
+/**
+ * How often a mounted badge re-checks that its placeholders are still in the
+ * composer. Polled rather than observed: the composer is cleared by the site's
+ * own code when the message is sent, which need not fire an `input` event.
+ */
+const BADGE_STALE_CHECK_MS = 1000;
 
 interface Palette {
   dark: boolean;
@@ -147,85 +154,202 @@ function mask(value: string): string {
   return `${head}${"•".repeat(Math.min(8, v.length - 3))}${tail}`;
 }
 
+/**
+ * Drop every host carrying this id — plural on purpose. `getElementById` returns
+ * only the first match, so if a second copy of the extension ever mounts one
+ * (a re-injected content script, two unpacked builds side by side) the loser
+ * would be left on screen for good, looking like a duplicate badge.
+ */
 function removeById(id: string): void {
-  document.getElementById(id)?.remove();
+  for (const el of Array.from(document.querySelectorAll(`#${id}`))) el.remove();
 }
 
 function mountRoot(): HTMLElement | null {
   return document.body ?? document.documentElement ?? null;
 }
 
-/** A fixed-position shadow host, isolated from the page's CSS. */
-function createHost(id: string): { host: HTMLElement; shadow: ShadowRoot } | null {
-  const root = mountRoot();
-  if (!root) return null;
+const MARGIN = 16;
+/** Gap between the card and the top edge of the composer it hangs over. */
+const GAP = 10;
+
+/**
+ * How the card is positioned.
+ *
+ * `anchored` is the one we want: the host is hung **inside the composer's own
+ * container**, absolutely positioned over the composer's top edge. Placement is
+ * then the browser's job — the card rides with the box through page scroll,
+ * container scroll and a growing composer, with nothing measured on the scroll
+ * path and, crucially, no above/below choice that can flip mid-scroll and make
+ * one badge look like two.
+ *
+ * `pinned` is the fallback for pages where no usable container exists: the
+ * viewport's bottom-right corner.
+ */
+type Placement = "anchored" | "pinned";
+
+/** Elements that cut off anything sticking out past their box. */
+function clips(cs: CSSStyleDeclaration): boolean {
+  return (
+    cs.overflowX !== "visible" ||
+    cs.overflowY !== "visible" ||
+    (cs.contain ?? "").includes("paint")
+  );
+}
+
+/** Out of the scroll flow: moves with the viewport, not with the document. */
+function detached(cs: CSSStyleDeclaration): boolean {
+  return cs.position === "fixed" || cs.position === "sticky";
+}
+
+/**
+ * The element to hang an anchored card from: the nearest ancestor of the
+ * composer that is **positioned** (so it is a containing block for our
+ * absolutely positioned host) and does **not clip** its overflow (the card
+ * sticks out above the composer, so a clipping container would swallow it).
+ *
+ * Clipping ancestors *below* the one we pick are harmless — the host ends up a
+ * sibling of that subtree, not inside it. A `position: fixed` composer dock is
+ * picked up here too, since fixed counts as positioned: the card then stays
+ * docked with the composer exactly as the site's own chrome does.
+ *
+ * The one shape we refuse is a composer that has itself left the scroll flow
+ * while every usable container is still in it — an absolute host there would
+ * scroll out from under the box it is annotating. Returning null falls the card
+ * back to the viewport corner, which for a viewport-docked composer is stable
+ * anyway.
+ */
+function anchorContainer(anchor: Element | null | undefined): HTMLElement | null {
+  if (!(anchor instanceof HTMLElement) || !anchor.isConnected) return null;
+  try {
+    if (detached(getComputedStyle(anchor))) return null;
+  } catch {
+    return null;
+  }
+  let el = anchor.parentElement;
+  for (let hops = 0; el && hops < 8; hops += 1, el = el.parentElement) {
+    let cs: CSSStyleDeclaration;
+    try {
+      cs = getComputedStyle(el);
+    } catch {
+      return null;
+    }
+    if (clips(cs)) {
+      // Skipping past a clipper is fine — unless it is what holds the composer
+      // still against the viewport, in which case nothing above it will do.
+      if (detached(cs)) return null;
+      continue;
+    }
+    if (cs.position !== "static") return el;
+  }
+  return null;
+}
+
+/**
+ * Lay the host as a zero-height strip exactly over the composer's top edge,
+ * in `container`'s coordinates. The card inside then hangs off that strip's
+ * bottom-right corner — i.e. just above the composer, right-aligned to it.
+ *
+ * Offsets for an absolutely positioned box are measured from its containing
+ * block's *padding* box, in that block's own unscrolled coordinates — hence the
+ * `clientLeft`/`clientTop` (border) and `scrollLeft`/`scrollTop` corrections.
+ */
+function anchorTo(host: HTMLElement, container: HTMLElement, anchor: HTMLElement): boolean {
+  try {
+    const c = container.getBoundingClientRect();
+    const a = anchor.getBoundingClientRect();
+    if (a.width === 0 && a.height === 0) return false;
+    host.style.left = `${a.left - c.left - container.clientLeft + container.scrollLeft}px`;
+    host.style.top = `${a.top - c.top - container.clientTop + container.scrollTop}px`;
+    host.style.width = `${a.width}px`;
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+/** Viewport room above the composer — how tall an anchored card may grow. */
+function roomAbove(anchor: Element | null | undefined): number {
+  try {
+    const r = anchor?.getBoundingClientRect();
+    if (!r || (r.width === 0 && r.height === 0)) return 0;
+    return r.top - GAP - MARGIN;
+  } catch {
+    return 0;
+  }
+}
+
+interface Mount {
+  host: HTMLElement;
+  /** Where the card is appended — positions it within the host. */
+  box: HTMLElement;
+  placement: Placement;
+}
+
+/**
+ * A shadow host for one card. Contents live in a shadow root, so page CSS
+ * cannot reach them; the host itself now sits in the page's own tree when
+ * anchored, so its own box is reset defensively against inherited page rules.
+ *
+ * Pass the composer to anchor to it; pass nothing to pin to the viewport.
+ */
+function createHost(id: string, anchor?: Element | null): Mount | null {
+  const fallbackRoot = mountRoot();
+  if (!fallbackRoot) return null;
   removeById(id);
+
   const host = make("div", {
-    position: "fixed",
     zIndex: "2147483647",
-    // The host itself is a transparent, non-interactive layer; the card inside
+    // The host is a transparent, non-interactive layer; the card inside
     // re-enables pointer events for itself.
     pointerEvents: "none",
-    inset: "auto",
+    // The host is a child of the page now, so neutralise anything the site's
+    // stylesheet might otherwise impose on a stray <div>.
+    margin: "0",
+    padding: "0",
+    border: "0",
+    background: "none",
+    float: "none",
+    transform: "none",
+    clipPath: "none",
+    minWidth: "0",
+    maxWidth: "none",
   });
   host.id = id;
   const shadow = host.attachShadow({ mode: "open" });
-  root.appendChild(host);
-  return { host, shadow };
-}
 
-const MARGIN = 16;
-/** Gap between the panel and the composer it is anchored to. */
-const GAP = 12;
-
-/**
- * Park the panel next to the composer it belongs to, so the connection is
- * obvious — above it when there is room, below it otherwise.
- *
- * A chat composer is not always at the bottom of the screen: ChatGPT centres it
- * vertically until the first message is sent, which leaves only half a viewport
- * above. So we measure both sides, take the roomier one, and fall back to the
- * viewport corner (where the full height is available) when neither side can
- * show a useful amount of the panel.
- *
- * Returns the height the caller may actually use, so the panel can cap itself
- * and scroll internally instead of running off the screen.
- */
-function place(
-  host: HTMLElement,
-  anchor: Element | null | undefined,
-  width: number,
-  comfortable: number,
-): number {
-  const viewportHeight = window.innerHeight;
-  const corner = (): number => {
+  const container = anchorContainer(anchor);
+  let placement: Placement = "pinned";
+  if (container && anchor instanceof HTMLElement) {
+    host.style.position = "absolute";
+    host.style.right = "auto";
+    host.style.bottom = "auto";
+    host.style.height = "0";
+    container.appendChild(host);
+    if (anchorTo(host, container, anchor)) placement = "anchored";
+    else host.remove();
+  }
+  if (placement === "pinned") {
+    host.style.position = "fixed";
+    host.style.top = "auto";
+    host.style.left = "auto";
     host.style.right = `${MARGIN}px`;
     host.style.bottom = `${MARGIN}px`;
-    return viewportHeight - MARGIN * 2;
-  };
-
-  let rect: DOMRect | null = null;
-  try {
-    rect = anchor?.getBoundingClientRect() ?? null;
-  } catch {
-    rect = null;
+    host.style.width = "auto";
+    host.style.height = "auto";
+    fallbackRoot.appendChild(host);
   }
-  if (!rect || rect.width === 0 || rect.bottom < 0 || rect.top > viewportHeight) return corner();
 
-  const spaceAbove = rect.top - GAP - MARGIN;
-  const spaceBelow = viewportHeight - rect.bottom - GAP - MARGIN;
-  if (Math.max(spaceAbove, spaceBelow) < comfortable) return corner();
-
-  // Right-align on the composer, clamped so the panel stays fully on screen.
-  const right = Math.max(MARGIN, window.innerWidth - rect.right);
-  host.style.right = `${Math.min(right, Math.max(MARGIN, window.innerWidth - width - MARGIN))}px`;
-
-  if (spaceAbove >= spaceBelow) {
-    host.style.bottom = `${viewportHeight - rect.top + GAP}px`;
-    return spaceAbove;
-  }
-  host.style.top = `${rect.bottom + GAP}px`;
-  return spaceBelow;
+  // Anchored: hang the card off the strip's bottom-right corner, so it sits
+  // GAP above the composer and shares its right edge. Pinned: the host already
+  // *is* the corner, so the card just fills it.
+  const box = make(
+    "div",
+    placement === "anchored"
+      ? { position: "absolute", right: "0", bottom: `${GAP}px`, display: "flex", justifyContent: "flex-end" }
+      : { display: "flex", justifyContent: "flex-end" },
+  );
+  shadow.appendChild(box);
+  return { host, box, placement };
 }
 
 /* -------------------------------- the panel ------------------------------- */
@@ -236,14 +360,38 @@ export interface PasteNoticeOptions {
   replacements: PasteReplacement[];
   /** Rule names behind a warn/block decision. */
   ruleIds: string[];
-  /** Composer the paste landed in — used to position the panel. */
+  /**
+   * Composer the paste landed in. Not used for positioning (the card is pinned
+   * to the viewport) — it is how the badge tells whether its placeholders are
+   * still in the box. See `stillInComposer`.
+   */
   anchor?: Element | null;
   /** When given, an "undo" button is shown that puts the original text back. */
   onUndo?: () => void;
+  /**
+   * The composer refused the write, so nothing actually landed in the box. The
+   * guard has already claimed the paste at this point, so without saying this
+   * out loud the user just watches their paste vanish with no explanation.
+   */
+  insertFailed?: boolean;
 }
 
 let dismissTimer: ReturnType<typeof setTimeout> | null = null;
 let escHandler: ((e: KeyboardEvent) => void) | null = null;
+
+/**
+ * The last pseudonymised paste, kept so the popup's "Reveal real values" has
+ * something to reopen. In-page reveal never rewrites the composer by design
+ * (see `content/reveal.ts`), so for a paste the user has not sent yet this
+ * panel is the *only* place the originals can be shown.
+ */
+let lastReview: PasteNoticeOptions | null = null;
+
+/** Flips the originals on/off inside the panel that is currently mounted. */
+let panelSetOriginals: ((shown: boolean) => void) | null = null;
+
+/** Whether a mounted panel is showing real values right now. */
+let originalsShown = false;
 
 export function hidePasteNotice(): void {
   if (dismissTimer !== null) {
@@ -254,46 +402,86 @@ export function hidePasteNotice(): void {
     window.removeEventListener("keydown", escHandler, true);
     escHandler = null;
   }
+  panelSetOriginals = null;
+  originalsShown = false;
   removeById(HOST_ID);
 }
 
-/** Give a button a hover/press feel without any stylesheet. */
-function wireButtonFeel(btn: HTMLButtonElement, base: string, hover: string): void {
+/**
+ * Give a button a hover/press feel without any stylesheet. `paint` is the
+ * element whose background actually changes — on the review badge the hovered
+ * control is the button, but the surface that tints is the pill around it.
+ */
+function wireButtonFeel(
+  btn: HTMLElement,
+  base: string,
+  hover: string,
+  paint: HTMLElement = btn,
+): void {
   btn.addEventListener("mouseenter", () => {
-    btn.style.background = hover;
+    paint.style.background = hover;
   });
   btn.addEventListener("mouseleave", () => {
-    btn.style.background = base;
+    paint.style.background = base;
   });
 }
 
-export function showPasteNotice(opts: PasteNoticeOptions): void {
+/**
+ * Render the full detail panel — the substitutions list, undo, everything.
+ * Called either directly (warn/block, which need active attention right
+ * away) or on demand when the user clicks the review badge (pseudonymised)
+ * or the popup's "Reveal real values" button (`showOriginals`).
+ */
+function openFullNotice(opts: PasteNoticeOptions, showOriginals = false): void {
   try {
     hidePastePending();
+    hidePasteBadge();
     hidePasteNotice();
 
+    // Nothing reached the composer, so every line below that describes what is
+    // "now in the box" would be a lie.
+    const failed = opts.insertFailed === true;
+
+    // Only a pseudonymised paste has originals worth coming back to — warn
+    // and block never touch the composer, so once acknowledged there is
+    // nothing left to review.
+    const returnToBadge = opts.outcome === "pseudonymised" && !failed;
+    const dismiss = (): void => {
+      hidePasteNotice();
+      if (returnToBadge) showPasteBadge(opts);
+    };
+
     const p = palette();
-    const accent = accentFor(opts.outcome, p);
+    // A failed write is a failure whatever the rules decided, so it takes the
+    // warning colour rather than the reassuring brand green.
+    const accent = failed ? accentFor("warned", p) : accentFor(opts.outcome, p);
     const width = 348;
 
-    const mounted = createHost(HOST_ID);
+    // The panel is tall, so unlike the badge it only hangs over the composer
+    // when there is real room above it — otherwise it would run off the top of
+    // the screen. This is decided once, when the panel opens, and never
+    // revisited: a side that can change under the user is what made the old
+    // placement feel broken.
+    const room = roomAbove(opts.anchor);
+    const anchored = room >= 300;
+
+    const mounted = createHost(HOST_ID, anchored ? opts.anchor : null);
     if (!mounted) return;
-    const { host, shadow } = mounted;
-    // Below this the panel is not worth squeezing next to the composer; place()
-    // then puts it in the viewport corner, where it gets the full height.
-    const available = place(host, opts.anchor, width, 380);
+    const { box } = mounted;
 
     const card = make("div", {
       pointerEvents: "auto",
       boxSizing: "border-box",
       width: `${width}px`,
       maxWidth: "calc(100vw - 32px)",
-      // Column layout capped to the room `place()` found: only the list of
-      // substitutions scrolls, so the header and the buttons can never be
-      // pushed off the screen.
+      // Column layout capped to the room it has: only the list of substitutions
+      // scrolls, so the header and the buttons can never be pushed off screen.
       display: "flex",
       flexDirection: "column",
-      maxHeight: `${Math.max(220, Math.min(560, available))}px`,
+      maxHeight:
+        mounted.placement === "anchored"
+          ? `${Math.min(560, room)}px`
+          : `min(560px, calc(100vh - ${MARGIN * 2}px))`,
       overflow: "hidden",
       background: p.surface,
       color: p.text,
@@ -354,7 +542,7 @@ export function showPasteNotice(opts: PasteNoticeOptions): void {
     );
     close.type = "button";
     close.setAttribute("aria-label", "Dismiss");
-    close.addEventListener("click", () => hidePasteNotice());
+    close.addEventListener("click", dismiss);
     header.appendChild(close);
     card.appendChild(header);
 
@@ -378,12 +566,19 @@ export function showPasteNotice(opts: PasteNoticeOptions): void {
     /* -- what happened -- */
     const bodyBox = make("div", { padding: "0 14px 12px", flex: "0 0 auto" });
     bodyBox.appendChild(
-      make("div", { fontSize: "14px", fontWeight: "650", color: accent, marginBottom: "4px" }, TITLE[opts.outcome]),
+      make(
+        "div",
+        { fontSize: "14px", fontWeight: "650", color: accent, marginBottom: "4px" },
+        failed ? "Nothing was pasted" : TITLE[opts.outcome],
+      ),
     );
 
     const count = opts.replacements.reduce((n, r) => n + r.count, 0);
     let summary: string;
-    if (opts.outcome === "pseudonymised") {
+    if (failed) {
+      summary =
+        "AvoPseudo checked your text, but this box refused the write — so nothing was pasted. What you copied is still on your clipboard.";
+    } else if (opts.outcome === "pseudonymised") {
       summary =
         count === 1
           ? "1 value was replaced with a placeholder before your text reached the chat box."
@@ -398,7 +593,7 @@ export function showPasteNotice(opts: PasteNoticeOptions): void {
     }
     bodyBox.appendChild(make("div", { color: p.text }, summary));
 
-    if (opts.outcome === "pseudonymised") {
+    if (opts.outcome === "pseudonymised" && !failed) {
       bodyBox.appendChild(
         make(
           "div",
@@ -408,7 +603,9 @@ export function showPasteNotice(opts: PasteNoticeOptions): void {
       );
     }
 
-    if (opts.ruleIds.length > 0 && opts.outcome !== "pseudonymised") {
+    // On a failed write the rules that fired are the useful detail, so show
+    // them here too — there is no substitution list to carry that information.
+    if (opts.ruleIds.length > 0 && (failed || opts.outcome !== "pseudonymised")) {
       bodyBox.appendChild(
         make(
           "div",
@@ -420,7 +617,9 @@ export function showPasteNotice(opts: PasteNoticeOptions): void {
     card.appendChild(bodyBox);
 
     /* -- the substitutions, value by value -- */
-    if (opts.replacements.length > 0) {
+    // Suppressed on a failed write: those placeholders are not in the box, so
+    // listing them as "what was replaced" would point at nothing.
+    if (opts.replacements.length > 0 && !failed) {
       const listBox = make("div", {
         margin: "0 14px 12px",
         border: `1px solid ${p.border}`,
@@ -539,16 +738,24 @@ export function showPasteNotice(opts: PasteNoticeOptions): void {
         );
       }
 
-      toggle.addEventListener("click", () => {
-        shown = !shown;
+      const applyOriginals = (next: boolean): void => {
+        shown = next;
+        originalsShown = next;
         toggle.textContent = shown ? "Hide originals" : "Show originals";
         for (const { cell, value } of valueCells) {
           cell.textContent = shown ? value : mask(value);
           cell.style.color = shown ? p.text : p.muted;
         }
-      });
+      };
+      toggle.addEventListener("click", () => applyOriginals(!shown));
 
       card.appendChild(listBox);
+
+      // Hand the switch out so the popup's reveal button can drive this panel
+      // without rebuilding it. Only set once the rows exist — there is nothing
+      // to unmask on a warn/block panel.
+      panelSetOriginals = applyOriginals;
+      if (showOriginals) applyOriginals(true);
     }
 
     /* -- actions -- */
@@ -582,7 +789,12 @@ export function showPasteNotice(opts: PasteNoticeOptions): void {
         try {
           opts.onUndo?.();
         } finally {
+          // The composer is back to the user's original text — there is
+          // nothing pseudonymised left to review, so no badge afterwards, and
+          // nothing for the popup's reveal button to reopen either.
+          if (lastReview === opts) lastReview = null;
           hidePasteNotice();
+          hidePasteBadge();
         }
       });
       actions.appendChild(undo);
@@ -601,14 +813,14 @@ export function showPasteNotice(opts: PasteNoticeOptions): void {
         fontSize: "12px",
         fontWeight: "600",
       },
-      opts.outcome === "blocked" ? "Understood" : "Got it",
+      failed || opts.outcome === "blocked" ? "Understood" : "Got it",
     );
     ok.type = "button";
-    ok.addEventListener("click", () => hidePasteNotice());
+    ok.addEventListener("click", dismiss);
     actions.appendChild(ok);
     card.appendChild(actions);
 
-    shadow.appendChild(card);
+    box.appendChild(card);
 
     requestAnimationFrame(() => {
       card.style.opacity = "1";
@@ -616,20 +828,318 @@ export function showPasteNotice(opts: PasteNoticeOptions): void {
     });
 
     escHandler = (e: KeyboardEvent) => {
-      if (e.key === "Escape") hidePasteNotice();
+      if (e.key === "Escape") dismiss();
     };
     window.addEventListener("keydown", escHandler, true);
 
-    // A block needs an explicit acknowledgement; the rest fades on its own.
-    if (opts.outcome !== "blocked") {
-      dismissTimer = setTimeout(() => hidePasteNotice(), AUTO_DISMISS_MS);
+    // A block — or a paste that never landed — needs an explicit
+    // acknowledgement; the rest fades on its own (a pseudonymised paste
+    // settles back down to the review badge). A panel the user asked for from
+    // the popup also stays: pulling the real values back off the screen a few
+    // seconds after they were requested would read as a bug.
+    if (opts.outcome !== "blocked" && !failed && !showOriginals) {
+      dismissTimer = setTimeout(dismiss, AUTO_DISMISS_MS);
     }
   } catch {
     // Never break the host page.
   }
 }
 
-/* ------------------------- pending / composer pulse ----------------------- */
+/**
+ * Public entry point used by the paste guard. A pseudonymised paste is the
+ * common, non-blocking case — instead of interrupting with the full panel
+ * every time, show a small persistent review badge in the corner and
+ * let the full detail (originals, undo) open on demand. Warn, block and a
+ * failed write are rarer and need active attention, so they still show the
+ * full panel right away.
+ */
+export function showPasteNotice(opts: PasteNoticeOptions): void {
+  if (opts.outcome === "pseudonymised" && !opts.insertFailed) {
+    // Remember it: until the message is sent these placeholders exist nowhere
+    // but the composer, which in-page reveal will not touch — so this record is
+    // what the popup's reveal button reopens. See `revealPasteReview`.
+    if (opts.replacements.length > 0) lastReview = opts;
+    showPasteBadge(opts);
+  } else {
+    openFullNotice(opts);
+  }
+}
+
+/* ---------------------- reveal, driven from the popup --------------------- */
+
+/** How many individual values a review covers (a value can occur many times). */
+function reviewCount(opts: PasteNoticeOptions): number {
+  return opts.replacements.reduce((n, r) => n + r.count, 0);
+}
+
+/**
+ * Show the real values behind the placeholders that are still sitting in the
+ * composer, by (re)opening the review panel on them.
+ *
+ * This is the composer half of the popup's "Reveal real values": `revealInPage`
+ * only ever rewrites finished conversation bubbles — it deliberately refuses to
+ * touch a textarea or a contenteditable, since editing the box the user is
+ * typing in would fight the editor and could send real data by accident. So for
+ * a paste that has not been sent yet, reveal would otherwise appear to do
+ * nothing at all.
+ *
+ * Returns the number of values now on show; 0 when there is nothing to review
+ * (no pseudonymised paste, or its placeholders have already left the composer).
+ */
+export function revealPasteReview(): number {
+  try {
+    const opts = lastReview;
+    if (!opts || opts.replacements.length === 0) return 0;
+    if (!stillInComposer(opts)) {
+      lastReview = null;
+      return 0;
+    }
+    if (panelSetOriginals && document.getElementById(HOST_ID)) {
+      // Already open — just unmask, keeping the user's scroll position.
+      panelSetOriginals(true);
+    } else {
+      openFullNotice(opts, true);
+      if (!originalsShown) return 0; // mount refused
+    }
+    return reviewCount(opts);
+  } catch {
+    return 0;
+  }
+}
+
+/** Mask the values again in an open review panel. Returns how many were hidden. */
+export function hidePasteReview(): number {
+  try {
+    if (!originalsShown || !panelSetOriginals) return 0;
+    const count = lastReview ? reviewCount(lastReview) : 0;
+    panelSetOriginals(false);
+    return count;
+  } catch {
+    return 0;
+  }
+}
+
+/** True while a review panel is showing real values. */
+export function isPasteReviewRevealed(): boolean {
+  return originalsShown;
+}
+
+/** Forget the last review — the originals are back in the box, or gone. */
+export function clearPasteReview(): void {
+  lastReview = null;
+}
+
+/**
+ * True while the composer still holds at least one of the placeholders this
+ * badge is about.
+ *
+ * A badge outlives the panel by design, so it can easily outlive its own
+ * subject: the moment the user sends the message the composer is emptied, and
+ * a badge still offering "undo — paste my original" would have nothing left to
+ * put back. When we cannot tell (no anchor, an unreadable box) we keep the
+ * badge — silently dropping the user's only route back to the originals is the
+ * worse failure.
+ */
+function stillInComposer(opts: PasteNoticeOptions): boolean {
+  const anchor = opts.anchor;
+  if (!(anchor instanceof HTMLElement)) return true;
+  if (opts.replacements.length === 0) return true;
+  if (!anchor.isConnected) return false;
+  try {
+    // `textContent` is enough to find a placeholder and, unlike `innerText`,
+    // does not force a layout — this runs on a timer.
+    const text =
+      anchor instanceof HTMLTextAreaElement || anchor instanceof HTMLInputElement
+        ? anchor.value
+        : (anchor.textContent ?? "");
+    return opts.replacements.some((r) => text.includes(r.placeholder));
+  } catch {
+    return true;
+  }
+}
+
+/** Teardown for the watcher belonging to the currently mounted badge. */
+let badgeWatchers: (() => void) | null = null;
+
+/**
+ * Keep a mounted badge honest for as long as it lives. Unlike the panel, the
+ * badge is not a flash — it can sit there for minutes, and three things can
+ * happen to it in that time:
+ *
+ *  - **its subject leaves.** See `stillInComposer`.
+ *  - **the composer resizes.** Scrolling no longer moves the badge (it rides
+ *    in the composer's own container), but the offset between the container
+ *    and the box does change when the box grows, so re-measure on resize.
+ *  - **the site takes our node.** An anchored host lives in the page's own
+ *    tree, and a React re-render of that subtree can carry it off. Put it back
+ *    rather than silently losing the user's only route to the originals.
+ *
+ * Returns the function that unwires it.
+ */
+function watchBadge(mounted: Mount, opts: PasteNoticeOptions): () => void {
+  const { host, placement } = mounted;
+  const anchor = opts.anchor;
+  const container = placement === "anchored" ? host.parentElement : null;
+  const live = container !== null && anchor instanceof HTMLElement;
+
+  let frame = 0;
+  const remeasure = (): void => {
+    if (!live || frame !== 0) return;
+    frame = requestAnimationFrame(() => {
+      frame = 0;
+      if (host.isConnected) anchorTo(host, container, anchor as HTMLElement);
+    });
+  };
+
+  let sizeObserver: ResizeObserver | null = null;
+  try {
+    if (live && typeof ResizeObserver === "function") {
+      sizeObserver = new ResizeObserver(remeasure);
+      sizeObserver.observe(anchor as HTMLElement);
+      sizeObserver.observe(container);
+    }
+  } catch {
+    sizeObserver = null;
+  }
+
+  const staleTimer = window.setInterval(() => {
+    if (!stillInComposer(opts)) {
+      hidePasteBadge();
+      return;
+    }
+    if (!host.isConnected) {
+      showPasteBadge(opts);
+      return;
+    }
+    remeasure();
+  }, BADGE_STALE_CHECK_MS);
+
+  return () => {
+    window.clearInterval(staleTimer);
+    sizeObserver?.disconnect();
+    if (frame !== 0) cancelAnimationFrame(frame);
+  };
+}
+
+/**
+ * A compact, persistent pill sitting just above the composer: "N values
+ * pseudonymised — review". Stays until dismissed, replaced by the next paste,
+ * opened into the full panel, or until the placeholders leave the composer —
+ * it is the only way back to the originals once the full panel has closed.
+ */
+export function showPasteBadge(opts: PasteNoticeOptions): void {
+  try {
+    hidePastePending();
+    // A panel still open from an earlier paste is about to be contradicted by
+    // this badge; it must not linger on top of it.
+    hidePasteNotice();
+    hidePasteBadge();
+    // Nothing left to review — e.g. the panel was closed after the message had
+    // already been sent.
+    if (!stillInComposer(opts)) return;
+
+    const p = palette();
+    const accent = accentFor(opts.outcome, p);
+    const mounted = createHost(BADGE_ID, opts.anchor);
+    if (!mounted) return;
+    const { box } = mounted;
+
+    const count = opts.replacements.reduce((n, r) => n + r.count, 0);
+    const label = count === 1 ? "1 value pseudonymised" : `${count} values pseudonymised`;
+
+    // A plain container holding two real buttons: a button nested inside a
+    // button is invalid, and assistive tech flattens it — which used to leave
+    // the × both unannounced and unreachable by keyboard.
+    const pill = make("div", {
+      pointerEvents: "auto",
+      display: "flex",
+      alignItems: "stretch",
+      background: p.surface,
+      color: p.text,
+      border: `1px solid ${p.border}`,
+      borderTop: `2px solid ${accent}`,
+      borderRadius: "999px",
+      // Clip each button's hover tint to the rounded shape.
+      overflow: "hidden",
+      boxShadow: p.shadow,
+      font: '12px/1.4 system-ui, -apple-system, "Segoe UI", Roboto, Helvetica, Arial, sans-serif',
+      opacity: "0",
+      transform: "translateY(4px)",
+      transition: "opacity 160ms ease, transform 160ms ease",
+    });
+
+    const review = make("button", {
+      display: "flex",
+      alignItems: "center",
+      gap: "7px",
+      padding: "6px 8px 6px 11px",
+      border: "none",
+      background: "transparent",
+      color: "inherit",
+      font: "inherit",
+      cursor: "pointer",
+    });
+    review.type = "button";
+    review.setAttribute("aria-label", `${label}. Review what AvoPseudo replaced.`);
+    wireButtonFeel(review, p.surface, p.surfaceAlt, pill);
+    review.appendChild(shield(accent, 14));
+    review.appendChild(make("span", { fontWeight: "600" }, label));
+    review.appendChild(make("span", { color: p.muted, fontSize: "11px" }, "· review"));
+    review.addEventListener("click", () => {
+      // The placeholders can have left the box between the last poll and this
+      // click; opening a review of nothing would only confuse.
+      if (!stillInComposer(opts)) {
+        hidePasteBadge();
+        return;
+      }
+      openFullNotice(opts);
+    });
+    pill.appendChild(review);
+
+    const dismiss = make(
+      "button",
+      {
+        display: "flex",
+        alignItems: "center",
+        border: "none",
+        borderLeft: `1px solid ${p.border}`,
+        background: "transparent",
+        color: p.muted,
+        cursor: "pointer",
+        font: "inherit",
+        fontSize: "14px",
+        lineHeight: "1",
+        padding: "0 9px",
+      },
+      "×",
+    );
+    dismiss.type = "button";
+    dismiss.setAttribute("aria-label", "Dismiss");
+    wireButtonFeel(dismiss, "transparent", p.surfaceAlt);
+    dismiss.addEventListener("click", () => hidePasteBadge());
+    pill.appendChild(dismiss);
+
+    box.appendChild(pill);
+    badgeWatchers = watchBadge(mounted, opts);
+
+    requestAnimationFrame(() => {
+      pill.style.opacity = "1";
+      pill.style.transform = "translateY(0)";
+    });
+  } catch {
+    /* never break the host page */
+  }
+}
+
+export function hidePasteBadge(): void {
+  if (badgeWatchers) {
+    badgeWatchers();
+    badgeWatchers = null;
+  }
+  removeById(BADGE_ID);
+}
+
+/* ------------------------------ pending pill ------------------------------ */
 
 /**
  * A small pill shown while the on-device model is still looking at the paste,
@@ -638,10 +1148,10 @@ export function showPasteNotice(opts: PasteNoticeOptions): void {
 export function showPastePending(anchor?: Element | null): void {
   try {
     const p = palette();
-    const mounted = createHost(PENDING_ID);
+    // Same spot the badge will take, so the pill visibly turns into the result
+    // rather than jumping across the screen.
+    const mounted = createHost(PENDING_ID, anchor);
     if (!mounted) return;
-    // One line tall: it fits beside the composer wherever the composer is.
-    place(mounted.host, anchor, 240, 0);
 
     const pill = make("div", {
       pointerEvents: "none",
@@ -658,7 +1168,7 @@ export function showPastePending(anchor?: Element | null): void {
     });
     pill.appendChild(shield(accentFor("pseudonymised", p), 14));
     pill.appendChild(make("span", {}, "AvoPseudo is checking your paste…"));
-    mounted.shadow.appendChild(pill);
+    mounted.box.appendChild(pill);
   } catch {
     /* ignore */
   }
@@ -668,52 +1178,3 @@ export function hidePastePending(): void {
   removeById(PENDING_ID);
 }
 
-/**
- * Flash an outline over the composer so the user's eye goes to the box that
- * was just rewritten. Purely decorative overlay — it never touches the editor.
- */
-export function pulseComposer(el: Element, outcome: PasteOutcome = "pseudonymised"): void {
-  try {
-    const root = mountRoot();
-    if (!root) return;
-    removeById(PULSE_ID);
-
-    const rect = el.getBoundingClientRect();
-    if (rect.width === 0 || rect.height === 0) return;
-    const accent = accentFor(outcome, palette());
-
-    let radius = "12px";
-    try {
-      radius = getComputedStyle(el).borderRadius || radius;
-    } catch {
-      /* keep the default */
-    }
-
-    const overlay = make("div", {
-      position: "fixed",
-      left: `${rect.left - 3}px`,
-      top: `${rect.top - 3}px`,
-      width: `${rect.width + 6}px`,
-      height: `${rect.height + 6}px`,
-      border: `2px solid ${accent}`,
-      borderRadius: radius,
-      boxShadow: `0 0 0 4px ${accent}22`,
-      pointerEvents: "none",
-      zIndex: "2147483646",
-      opacity: "0",
-      transition: "opacity 200ms ease",
-    });
-    overlay.id = PULSE_ID;
-    root.appendChild(overlay);
-
-    requestAnimationFrame(() => {
-      overlay.style.opacity = "1";
-      setTimeout(() => {
-        overlay.style.opacity = "0";
-        setTimeout(() => overlay.remove(), 250);
-      }, 1400);
-    });
-  } catch {
-    /* decorative only */
-  }
-}

@@ -30,7 +30,18 @@ import type { NerEntity } from "@/core/ner/types";
 import { findAdapter } from "@/adapters";
 import type { LLMAdapter } from "@/adapters/types";
 import { showBanner } from "@/ui/banner";
-import { hideInPage, isRevealed, revealInPage } from "@/content/reveal";
+import {
+  hideInPage,
+  isRevealed,
+  resetRevealState,
+  revealInPage,
+  revealedCount,
+} from "@/content/reveal";
+import {
+  hidePasteReview,
+  isPasteReviewRevealed,
+  revealPasteReview,
+} from "@/ui/paste-notice";
 import { installPasteGuard } from "@/content/paste-guard";
 import {
   DEFAULT_CONFIG,
@@ -66,6 +77,11 @@ window.addEventListener("message", (event: MessageEvent) => {
     applyRules(data.payload.yaml);
   } else if (data.kind === "reveal") {
     handleReveal(data.payload.reveal);
+  } else if (data.kind === "reveal-status-request") {
+    window.postMessage(
+      { ns: GUARD_NS, kind: "reveal-status", payload: { reveal: revealState() } },
+      location.origin,
+    );
   } else if (data.kind === "ner-result") {
     const pending = nerPending.get(data.payload.id);
     if (pending) {
@@ -87,13 +103,37 @@ function applyRules(yaml: string): void {
   }
 }
 
+/**
+ * Is the page actually showing real values right now?
+ *
+ * `isRevealed()` alone is not enough: revealing while every placeholder is
+ * still in the composer marks nothing in the page (reveal never rewrites the
+ * box the user is typing in), so the flag would be true with nothing on show —
+ * and the popup would come back offering "Hide" over an unrevealed page.
+ */
+function revealState(): boolean {
+  return isRevealed() && (revealedCount() > 0 || isPasteReviewRevealed());
+}
+
 function handleReveal(reveal: boolean): void {
   let replaced = 0;
+  let panel = false;
   let ok = true;
   try {
-    replaced = reveal
-      ? revealInPage(anonymizer.exportMap(), adapter?.conversationSelector ?? null)
-      : hideInPage();
+    if (reveal) {
+      // Drop a flag left true by an earlier reveal that marked nothing, so a
+      // second click still picks up placeholders that have since been sent
+      // into the conversation.
+      if (isRevealed() && revealedCount() === 0) resetRevealState();
+      replaced = revealInPage(anonymizer.exportMap(), adapter?.conversationSelector ?? null);
+      // The other half: placeholders still sitting in the composer, which the
+      // page walk above refuses to touch. Those are shown in the paste panel.
+      const inPanel = revealPasteReview();
+      panel = inPanel > 0;
+      replaced += inPanel;
+    } else {
+      replaced = hideInPage() + hidePasteReview();
+    }
   } catch {
     ok = false;
   }
@@ -101,7 +141,7 @@ function handleReveal(reveal: boolean): void {
     {
       ns: GUARD_NS,
       kind: "reveal-result",
-      payload: { reveal: isRevealed(), replaced, ok },
+      payload: { reveal: revealState(), replaced, panel, ok },
     },
     location.origin,
   );

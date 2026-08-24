@@ -36,12 +36,7 @@ import {
 } from "@/content/composer";
 import { planPaste, type PastePlan } from "@/content/paste-plan";
 import { showBanner } from "@/ui/banner";
-import {
-  hidePastePending,
-  pulseComposer,
-  showPasteNotice,
-  showPastePending,
-} from "@/ui/paste-notice";
+import { hidePastePending, showPasteNotice, showPastePending } from "@/ui/paste-notice";
 
 /**
  * Above this size we stay out of the way: the paste is almost certainly a file
@@ -77,9 +72,9 @@ const OUTCOME_ACTION: Record<PastePlan["outcome"], DetectionAction> = {
 };
 
 /**
- * Apply a plan to the composer and tell the user what we did.
- * `restore` re-establishes the caret first when the decision took a detour
- * through the async NER pass.
+ * Apply a plan to the composer and tell the user what we did — including when
+ * the write itself fails, which is the one case where the user would otherwise
+ * see nothing at all happen.
  */
 function applyPlan(deps: PasteGuardDeps, composer: Composer, plan: PastePlan): void {
   if (plan.outcome === "blocked") {
@@ -89,31 +84,40 @@ function applyPlan(deps: PasteGuardDeps, composer: Composer, plan: PastePlan): v
       ruleIds: plan.ruleIds,
       anchor: composer,
     });
-    pulseComposer(composer, "blocked");
     deps.emit(OUTCOME_ACTION.blocked, plan.findings);
     return;
   }
 
-  const inserted = insertText(composer, plan.text);
+  if (!insertText(composer, plan.text)) {
+    // We already claimed the paste with preventDefault(), so a refused write
+    // means the user's paste has simply disappeared. Say so — and never fall
+    // back to letting the original through, which is exactly the text the
+    // rules told us not to insert as-is.
+    showPasteNotice({
+      outcome: plan.outcome,
+      insertFailed: true,
+      replacements: [],
+      ruleIds: plan.ruleIds,
+      anchor: composer,
+    });
+    if (plan.outcome !== "clean") deps.emit(OUTCOME_ACTION[plan.outcome], plan.findings);
+    return;
+  }
 
   if (plan.outcome === "pseudonymised") {
-    pulseComposer(composer, "pseudonymised");
     showPasteNotice({
       outcome: "pseudonymised",
       replacements: plan.replacements,
       ruleIds: plan.ruleIds,
       anchor: composer,
-      // Only offer the undo when we actually managed to write the text.
-      onUndo: inserted
-        ? () => {
-            if (!replaceInComposer(composer, plan.text, plan.original)) {
-              showBanner({
-                message: "Could not restore your original text — the box has changed too much.",
-                tone: "warn",
-              });
-            }
-          }
-        : undefined,
+      onUndo: () => {
+        if (!replaceInComposer(composer, plan.text, plan.original)) {
+          showBanner({
+            message: "Could not restore your original text — the box has changed too much.",
+            tone: "warn",
+          });
+        }
+      },
     });
   } else if (plan.outcome === "warned") {
     showPasteNotice({
@@ -122,7 +126,6 @@ function applyPlan(deps: PasteGuardDeps, composer: Composer, plan: PastePlan): v
       ruleIds: plan.ruleIds,
       anchor: composer,
     });
-    pulseComposer(composer, "warned");
   }
 
   if (plan.outcome !== "clean") deps.emit(OUTCOME_ACTION[plan.outcome], plan.findings);

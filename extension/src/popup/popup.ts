@@ -6,11 +6,13 @@ import type {
   DetectionAction,
   DetectionEvent,
   GuardConfig,
+  RevealResponse,
 } from "@/shared/messages";
 import { DEFAULT_CONFIG } from "@/shared/messages";
 import {
   getConfig,
   getLogs,
+  getRevealStatus,
   sendReveal,
   setConfig,
 } from "@/popup/messaging";
@@ -56,6 +58,25 @@ function reflectReveal(): void {
   const btn = byId<HTMLButtonElement>("reveal-toggle");
   btn.textContent = revealed ? "Hide real values" : "Reveal real values";
   btn.classList.toggle("is-revealed", revealed);
+}
+
+/** The default line under the button, also used once values are hidden again. */
+const REVEAL_HINT_IDLE = "Swaps AvoPseudo's tags back to the real values, in this page only.";
+
+/**
+ * What to say after a reveal/hide. "Showing N real values in the page" is a lie
+ * when the placeholders are still in the chat box and were shown in AvoPseudo's
+ * own panel instead — and "0 values" needs an explanation, not a number.
+ */
+function revealHint(res: RevealResponse): string {
+  if (!res.reveal) return REVEAL_HINT_IDLE;
+  if (res.replaced === 0) {
+    return "Nothing to reveal — no AvoPseudo tags on this page.";
+  }
+  const values = `${res.replaced} real value${res.replaced === 1 ? "" : "s"}`;
+  return res.panel
+    ? `Showing ${values} in the AvoPseudo panel next to the chat box.`
+    : `Showing ${values} in the page.`;
 }
 
 function findingsLine(event: DetectionEvent): string {
@@ -144,9 +165,7 @@ function wireControls(): void {
         }
         revealed = res.reveal;
         reflectReveal();
-        hint.textContent = revealed
-          ? `Showing ${res.replaced} real value${res.replaced === 1 ? "" : "s"} in the page.`
-          : "Swaps AvoPseudo's tags back to the real values, in this page only.";
+        hint.textContent = revealHint(res);
       })
       .finally(() => {
         revealBtn.disabled = false;
@@ -162,7 +181,13 @@ async function init(): Promise<void> {
   wireControls();
   config = await getConfig().catch(() => ({ ...DEFAULT_CONFIG }));
   reflectConfig();
+
+  // The popup document is rebuilt from scratch every time it opens, so it has
+  // no memory of a prior reveal — ask the active tab what state it's in.
+  const status = await getRevealStatus().catch(() => ({ ok: false, reveal: false }));
+  revealed = status.ok ? status.reveal : false;
   reflectReveal();
+
   await loadActivity();
 }
 
